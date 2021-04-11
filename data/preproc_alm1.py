@@ -92,7 +92,6 @@ def get_urls():
             urls.append(href[alm1_idx:])
     return urls
 
-'''
 fsample = 19531.25
 num_channels = 32
 preproc_alm1 = SpikePreProcessor(num_channels, fsample, vis=False)
@@ -119,7 +118,6 @@ for session_num, url in enumerate(urls):
             channel_path.mkdir(parents=True, exist_ok=True)
             np.save(channel_pathname+"/spikes.npy", normed_spikes[channel])
             np.save(channel_pathname+"/spike_times.npy", spike_times[channel])
-'''
             
 #delete temps
 script_dir = os.path.dirname(__file__)
