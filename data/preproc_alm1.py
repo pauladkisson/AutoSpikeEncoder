@@ -107,7 +107,7 @@ num_channels = 32
 preproc_alm1 = SpikePreProcessor(num_channels, fsample, vis=False)
 
 urls = get_urls()
-start_session = 35 #starting on a specific session number (index)
+start_session = 0 #starting on a specific session number (index)
 urls = urls[start_session:]
 
 for session_num, url in enumerate(urls):
