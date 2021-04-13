@@ -47,13 +47,20 @@ def pull_data(url):
     download(url, username, password, "temp.tar")
     
     print("...Extracting...")
-    tar = tarfile.open(download_path)
-    tar.extractall()
-    tar.close()
+    try:
+        tar = tarfile.open(download_path)
+        tar.extractall()
+        tar.close()
+    except tarfile.ReadError:
+        print("Session .tar file could not be opened, so it will be skipped")
+        return []
     foldername = url.split('/')[-1][:-4]
     extract_path = os.path.join(script_dir, foldername)
     new_extract_path = os.path.join(script_dir, "temp")
-    shutil.rmtree(new_extract_path)
+    try:
+        shutil.rmtree(new_extract_path)
+    except FileNotFoundError:
+        pass
     os.rename(extract_path, new_extract_path)
     
     print("...Loading .mat files...")
@@ -63,9 +70,12 @@ def pull_data(url):
             continue
         else:
             file_path = os.path.join(new_extract_path, file)
-            matdict = loadmat(file_path)
-            ch_mua = matdict['ch_MUA']         
-            raw_data.append(ch_mua)
+            try:
+                matdict = loadmat(file_path)
+                ch_mua = matdict['ch_MUA']
+                raw_data.append(ch_mua)
+            except (ValueError, TypeError): #.mat file is corrupted
+                print("%s is corrupted, so it will be skipped" %file)
     
     return raw_data
 
@@ -97,16 +107,18 @@ num_channels = 32
 preproc_alm1 = SpikePreProcessor(num_channels, fsample, vis=False)
 
 urls = get_urls()
+start_session = 35 #starting on a specific session number (index)
+urls = urls[start_session:]
 
 for session_num, url in enumerate(urls):
-    print("Session %s / %s" %(session_num+1, len(urls)))
+    print("Session %s / %s" %(session_num+start_session+1, len(urls)+start_session))
     raw_data = pull_data(url)
     print("...Processing...")
     for trial_num, trial_data in enumerate(raw_data):
         print("Trial %s / %s" % (trial_num+1, len(raw_data)))
         data = preproc_alm1(trial_data)
         normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
-        trial_pathname = "alm1/session_"+str(session_num)+"/trial_"+str(trial_num)
+        trial_pathname = "alm1/session_"+str(session_num+start_session)+"/trial_"+str(trial_num)
         trial_path = pathlib.Path(trial_pathname)
         trial_path.mkdir(parents=True, exist_ok=True)
         np.save(trial_pathname+"/lfp.npy", normed_lfp)
@@ -122,6 +134,12 @@ for session_num, url in enumerate(urls):
 #delete temps
 script_dir = os.path.dirname(__file__)
 temp_path = os.path.join(script_dir, "temp")
-shutil.rmtree(temp_path)
+try:
+    shutil.rmtree(temp_path)
+except FileNotFoundError:
+    pass
 temp_path = os.path.join(script_dir, "temp.tar")
-os.remove(temp_path)
+try:
+    os.remove(temp_path)
+except FileNotFoundError:
+    pass

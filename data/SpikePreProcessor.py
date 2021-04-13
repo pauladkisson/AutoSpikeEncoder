@@ -19,7 +19,7 @@ class SpikePreProcessor:
         self.num_channels = num_channels
         self.fs = fsample
         self.thresh_factor = thresh_factor
-        self.lfp_fs = 1250
+        self.lfp_fs = 200 #Nyquist rate for 100Hz
         self.downsample_factor = int(fsample / self.lfp_fs)
         self.spike_width = 1
         self.Ts = 1 / self.fs
