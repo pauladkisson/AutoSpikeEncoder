@@ -19,11 +19,12 @@ class SpikePreProcessor:
         self.num_channels = num_channels
         self.fs = fsample
         self.thresh_factor = thresh_factor
-        self.lfp_fs = 200 #Nyquist rate for 100Hz
+        self.lfp_fs = 1000
         self.downsample_factor = int(fsample / self.lfp_fs)
         self.spike_width = 1
         self.Ts = 1 / self.fs
-        self.align_radius = 1*10**(-3)
+        window_radius = 1*10**(-3) #1ms window around each spike
+        self.align_radius = int(self.fs * window_radius) #discrete window size
         self.vis = vis
     
     def __call__(self, raw_data, vis=None):
@@ -63,7 +64,7 @@ class SpikePreProcessor:
         aligned_spikes, spike_times = self.align(bp_data, spike_indices)
         normed_spikes, normed_lfp, max_spike_voltages, max_lfp_voltages = self.normalize(aligned_spikes, lfp)
         if vis:
-            self.visualize(raw_data, normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages)
+            self.visualize(raw_data, bp_data, normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages)
         return normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages
     
     def filter_data(self, raw_data):
@@ -172,37 +173,39 @@ class SpikePreProcessor:
         spike_times = []
         for channel in range(self.num_channels):
             try:
-                old_channel_spike_times = t[spike_indices[channel]]
+                channel_spike_indices = spike_indices[channel]
             except IndexError: #No spikes detected
                 assert len(spike_indices[channel]) == 0
-                old_channel_spike_times = []
+                channel_spike_indices = []
             
             channel_spikes = []
             channel_spike_times = []
-            for i, spike_time in enumerate(old_channel_spike_times):
+            for i, spike_idx in enumerate(channel_spike_indices):
                 #obtain raw spike
-                spike_window = (spike_time - self.align_radius, spike_time + self.align_radius)
-                if spike_window[0] < 0 or spike_window[1] > tmax: #spike occurs within 1ms of start or end
+                spike_window = (spike_idx - self.align_radius, spike_idx + self.align_radius + 1)
+                if spike_window[0] < 0 or spike_window[1] > len(t): #spike occurs within 1ms of start or end
                     continue
-                window_mask = np.logical_and(t >= spike_window[0], t <= spike_window[1])
-                t_spike = t[window_mask]
-                spike = data[window_mask, channel]
+                spike = data[spike_window[0]:spike_window[1], channel]
                 
                 #align spike to argmax(diff(spike))
-                new_spike_idx = np.argmax(np.diff(spike))
-                new_spike_time = t_spike[new_spike_idx]
-                new_spike_window = (new_spike_time - self.align_radius, new_spike_time + self.align_radius)
-                if new_spike_window[0] < 0 or new_spike_window[1] > tmax: #aligned spike occurs within 1ms of start or end
+                local_spike_idx = np.argmax(np.diff(spike))
+                new_spike_idx = spike_idx + local_spike_idx - self.align_radius 
+                new_spike_window = (new_spike_idx - self.align_radius, new_spike_idx + self.align_radius+1)
+                if new_spike_window[0] < 0 or new_spike_window[1] > len(t): #aligned spike occurs within 1ms of start or end
                     continue
-                new_window_mask = np.logical_and(t >= new_spike_window[0], t <= new_spike_window[1])
-                aligned_spike = data[new_window_mask, channel]
+                aligned_spike = data[new_spike_window[0]:new_spike_window[1], channel]
+                spike_time = t[new_spike_idx]
+                
+                #ensure alignment produces correct spike
+                assert aligned_spike.shape == (self.align_radius*2 + 1,), \
+                "aligned_spike.shape should be %s but it is %s instead." % ((self.align_radius*2+1,), aligned_spike.shape)
                 
                 #record
-                if np.isin(new_spike_time, np.array(channel_spike_times)): #spike has already been detected
+                if np.isin(spike_time, np.array(channel_spike_times)): #spike has already been detected
                     continue
                 else:
                     channel_spikes.append(aligned_spike)
-                    channel_spike_times.append(new_spike_time)
+                    channel_spike_times.append(spike_time)
             
             aligned_spikes.append(np.array(channel_spikes))
             spike_times.append(np.array(channel_spike_times))
@@ -254,7 +257,7 @@ class SpikePreProcessor:
         
         return normed_spikes, normed_lfp, np.array(max_spike_voltages), max_lfp_voltages
     
-    def visualize(self, raw_data, normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages):
+    def visualize(self, raw_data, bp_data, normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages):
         '''
         visualize results of preprocessing:
             spike trains, normalized voltage recordings,
@@ -264,6 +267,8 @@ class SpikePreProcessor:
         ----------
         raw_data : ndarray (num_samples, num_channels)
             raw extracellular electrode recording
+        bp_data : ndarray (num_samples, num_channels)
+            bandpass filtered voltage recordings
         normed_spikes : list (num_channels)
             aligned_spikes normalized into (-1, 1)
         spike_times : list (num_channels)
@@ -283,8 +288,11 @@ class SpikePreProcessor:
         num_samples = raw_data.shape[0]
         tmax = self.Ts * (num_samples-1)
         t = np.linspace(0, tmax, num_samples)
-        align_t = np.arange(-1*self.align_radius, self.align_radius - self.Ts, self.Ts)*1000
+        align_t = np.linspace(-1, 1, self.align_radius*2+1)
         lfp_t = np.linspace(0, tmax, normed_lfp.shape[0])
+        psi = self.neo(bp_data)
+        sigma = np.median(np.abs(psi), axis=0) / 0.67
+        thresh = self.thresh_factor * sigma
         
         plt.figure()
         plt.plot(max_spike_voltages)
@@ -296,7 +304,7 @@ class SpikePreProcessor:
         plt.plot(max_lfp_voltages)
         plt.title("Max local field potentials used for normalization")
         plt.xlabel("Channel")
-        plt.ylabel("Voltage")
+        plt.ylabel("Voltage")        
         
         for channel in range(self.num_channels):
             if np.all(raw_data[:, channel] == 0): #dead channel
@@ -307,6 +315,15 @@ class SpikePreProcessor:
             spike_train[np.isin(t, spike_times[channel])] = 1
             assert spike_train.sum() == spike_times[channel].size, \
 "Incorrect spike train construction: spike train should have %s spikes but has %s spikes instead" % (spike_times[channel].size, spike_train.sum())
+
+            plt.figure()
+            plt.hold=True
+            plt.plot(t, psi)
+            plt.axhline(thresh, t[0], t[-1], c="r", ls="--")
+            plt.hold=False
+            plt.xlabel("Time (s)")
+            plt.ylabel("Energy")
+            plt.title("NEO Thresholding : Channel %s" %channel)
 
             plt.figure()
             plt.hold = True
