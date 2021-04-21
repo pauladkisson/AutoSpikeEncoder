@@ -252,8 +252,11 @@ class SpikePreProcessor:
             channel_spikes = []
             channel_spike_times = []
             for idx in channel:
-                channel_spikes.append(data[idx:idx+num_pts, channel_num])
-                channel_spike_times.append(t[idx:idx+num_pts])
+                spike = data[idx:idx+num_pts, channel_num]
+                assert spike.shape == (num_pts,),\
+"Spike shape is incorrect: Probably occurs within num_pts of end."
+                channel_spikes.append(spike)
+                channel_spike_times.append(t[idx])
             spikes.append(np.array(channel_spikes))
             spike_times.append(np.array(channel_spike_times))
             
@@ -293,7 +296,6 @@ class SpikePreProcessor:
                 max_voltage = np.max(np.abs(channel_spikes))
                 normed_spikes.append(channel_spikes / max_voltage)
             except ValueError: #No spikes detected
-                print("Breakpoint")
                 assert len(channel_spikes) == 0
                 max_voltage = np.nan
                 normed_spikes.append(np.array([]))

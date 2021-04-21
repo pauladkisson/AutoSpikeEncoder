@@ -107,6 +107,7 @@ def get_urls():
 #Constants
 fsample = 24000
 num_pts = 79
+total_pts = fsample*10*60
 
 urls = get_urls()
 urls.sort(key = lambda url: int(url.split('_')[-1].split('.')[0]))
@@ -115,6 +116,25 @@ urls = urls[start_session:]
 
 #Ground Truth
 ground_truth = pull_ground_truth("ground_truth.mat")
+#omitting spikes within num_pts of end
+num_skip = []
+for gt_session in ground_truth["spike_first_sample"][0]:
+    num_skip_session = []
+    for channel_spike_indices in gt_session:
+        num_skip_channel = 0
+        i = -1
+        while channel_spike_indices[i]+num_pts >= total_pts: #spike occurs within num_pts of end
+            num_skip_channel += 1
+            i -= 1
+        if num_skip_channel != 0:
+            num_skip_session.append(num_skip_channel)
+    num_skip.append(num_skip_session)
+
+for session, num_skip_session in enumerate(num_skip):
+    for channel, num_skip_channel in enumerate(num_skip_session):
+        ground_truth['spike_first_sample'][0, session] = ground_truth['spike_first_sample'][0, session][channel:channel+1, :-num_skip_channel]
+        ground_truth['spike_classes'][0, session] = ground_truth['spike_classes'][0, session][channel:channel+1, :-num_skip_channel]
+#save results
 gt_pathname = "pedreira/ground_truth"
 gt_path = pathlib.Path(gt_pathname)
 gt_path.mkdir(parents=True, exist_ok=True)
@@ -132,7 +152,7 @@ for session_num, url in enumerate(urls):
     print("...Processing...")
     num_channels = raw_data.shape[1]
     gt = spike_first_sample[0, session_num+start_session]
-    preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=False, gt=gt, num_pts=num_pts)
+    preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=True, gt=gt, num_pts=num_pts)
     data = preproc_pedreira(raw_data)
     normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
     session_pathname = "pedreira/session_"+str(session_num+start_session)
@@ -147,7 +167,7 @@ for session_num, url in enumerate(urls):
         channel_path.mkdir(parents=True, exist_ok=True)
         np.save(channel_pathname+"/spikes.npy", normed_spikes[channel])
         np.save(channel_pathname+"/spike_times.npy", spike_times[channel])
-            
+    break
 #delete temps
 script_dir = os.path.dirname(__file__)
 download_path = os.path.join(script_dir, "temp.mat")
