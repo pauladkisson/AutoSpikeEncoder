@@ -131,7 +131,7 @@ for session_num, url in enumerate(urls):
     print("...Processing...")
     num_channels = raw_data.shape[1]
     gt = spike_first_sample[0, session_num]
-    preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=True, gt=gt, num_pts=num_pts)
+    preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=False, gt=gt, num_pts=num_pts)
     data = preproc_pedreira(raw_data)
     normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
     session_pathname = "pedreira/session_"+str(session_num+start_session)
