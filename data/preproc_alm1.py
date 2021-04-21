@@ -22,6 +22,9 @@ from SpikePreProcessor import SpikePreProcessor
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0}) #suppress max figure warning
 
+data_dir = "/export/gaon1/data/jteneggi/DL"
+alm_dir = os.path.join(data_dir, "alm")
+
 def pull_data(url):
     '''
     Pulls data from url and returns the raw voltage recording.
@@ -43,20 +46,21 @@ def pull_data(url):
     username = "pauladkisson"
     password = "abcdefg"
     script_dir = os.path.dirname(__file__)
-    download_path = os.path.join(script_dir, "temp.tar")
-    download(url, username, password, "temp.tar")
+    download_path = os.path.join(data_dir, "temp.tar")
+    download(url, username, password, download_path)
     
     print("...Extracting...")
     try:
         tar = tarfile.open(download_path)
-        tar.extractall()
+        tar.extractall(data_dir)
         tar.close()
     except tarfile.ReadError:
         print("Session .tar file could not be opened, so it will be skipped")
         return []
     foldername = url.split('/')[-1][:-4]
-    extract_path = os.path.join(script_dir, foldername)
-    new_extract_path = os.path.join(script_dir, "temp")
+    print(f"foldername {foldername}")
+    extract_path = os.path.join(data_dir, foldername)
+    new_extract_path = os.path.join(data_dir, "temp")
     try:
         shutil.rmtree(new_extract_path)
     except FileNotFoundError:
@@ -118,27 +122,28 @@ for session_num, url in enumerate(urls):
         print("Trial %s / %s" % (trial_num+1, len(raw_data)))
         data = preproc_alm1(trial_data)
         normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
-        trial_pathname = "alm1/session_"+str(session_num+start_session)+"/trial_"+str(trial_num)
+        trial_pathname = os.path.join(alm_dir, f"session_{session_num + start_session}", f"trial_{trial_num}")
+        # trial_pathname = "alm1/session_"+str(session_num+start_session)+"/trial_"+str(trial_num)
         trial_path = pathlib.Path(trial_pathname)
         trial_path.mkdir(parents=True, exist_ok=True)
-        np.save(trial_pathname+"/lfp.npy", normed_lfp)
-        np.save(trial_pathname+"/max_spike_voltages.npy", max_spike_voltages)
-        np.save(trial_pathname+"/max_lfp_voltages.npy", max_lfp_voltages)
+        np.save(os.path.join(trial_pathname, "lfp.npy"), normed_lfp, allow_pickle=True)
+        np.save(os.path.join(trial_pathname, "max_spike_voltages.npy"), max_spike_voltages, allow_pickle=True)
+        np.save(os.path.join(trial_pathname, "max_lfp_voltages.npy"), max_lfp_voltages, allow_pickle=True)
         for channel in range(num_channels):
-            channel_pathname = trial_pathname+"/channel_"+str(channel)
+            channel_pathname = os.path.join(trial_pathname, f"channel_{channel}")
             channel_path = pathlib.Path(channel_pathname)
             channel_path.mkdir(parents=True, exist_ok=True)
-            np.save(channel_pathname+"/spikes.npy", normed_spikes[channel])
-            np.save(channel_pathname+"/spike_times.npy", spike_times[channel])
+            np.save(os.path.join(channel_pathname, "spikes.npy"), normed_spikes[channel], allow_pickle=True)
+            np.save(os.path.join(channel_pathname, "spike_times.npy"), spike_times[channel], allow_pickle=True)
             
 #delete temps
 script_dir = os.path.dirname(__file__)
-temp_path = os.path.join(script_dir, "temp")
+temp_path = os.path.join(data_dir, "temp")
 try:
     shutil.rmtree(temp_path)
 except FileNotFoundError:
     pass
-temp_path = os.path.join(script_dir, "temp.tar")
+temp_path = os.path.join(data_dir, "temp.tar")
 try:
     os.remove(temp_path)
 except FileNotFoundError:

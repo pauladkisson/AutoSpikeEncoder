@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 URL = 'https://portal.nersc.gov/project/crcns/download/index.php'
 
-def download(datafile,username,password, filename):
+def download(datafile, username, password, filename):
 
     login_data = dict(
         username=username,
