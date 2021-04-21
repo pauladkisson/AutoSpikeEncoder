@@ -33,8 +33,6 @@ def pull_data(url):
     ----------
     url : str
         url of data.
-    fsample : float
-        sampling rate.
 
     Returns
     -------
@@ -120,7 +118,7 @@ for session_num, url in enumerate(urls):
     print("...Processing...")
     for trial_num, trial_data in enumerate(raw_data):
         print("Trial %s / %s" % (trial_num+1, len(raw_data)))
-        data = preproc_alm1(trial_data)
+        data = preproc_alm1(trial_data, vis=True)
         normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
         trial_pathname = os.path.join(alm_dir, f"session_{session_num + start_session}", f"trial_{trial_num}")
         # trial_pathname = "alm1/session_"+str(session_num+start_session)+"/trial_"+str(trial_num)
