@@ -104,7 +104,9 @@ def get_urls():
             urls.append(href)
     return urls
 
+#Constants
 fsample = 24000
+num_pts = 79
 
 urls = get_urls()
 start_session = 0 #starting on a specific session number (index)
@@ -120,6 +122,7 @@ for field, val in ground_truth.items():
         continue
     field_pathname = gt_pathname+"/"+field
     np.save(field_pathname, val)
+spike_first_sample = ground_truth["spike_first_sample"]
 
 #Simulated Data
 for session_num, url in enumerate(urls):
@@ -127,7 +130,8 @@ for session_num, url in enumerate(urls):
     raw_data = pull_data(url)
     print("...Processing...")
     num_channels = raw_data.shape[1]
-    preproc_pedreira = SpikePreProcessor(num_channels, fsample)
+    gt = spike_first_sample[0, session_num]
+    preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=True, gt=gt, num_pts=num_pts)
     data = preproc_pedreira(raw_data)
     normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
     session_pathname = "pedreira/session_"+str(session_num+start_session)
@@ -142,8 +146,6 @@ for session_num, url in enumerate(urls):
         channel_path.mkdir(parents=True, exist_ok=True)
         np.save(channel_pathname+"/spikes.npy", normed_spikes[channel])
         np.save(channel_pathname+"/spike_times.npy", spike_times[channel])
-    if session_num >= 2:
-        break
             
 #delete temps
 script_dir = os.path.dirname(__file__)

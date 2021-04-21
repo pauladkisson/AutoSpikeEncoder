@@ -15,7 +15,7 @@ class SpikePreProcessor:
     Class for pre-processing raw voltage recordings
     '''
     
-    def __init__(self, num_channels, fsample, thresh_factor=100, vis=False):
+    def __init__(self, num_channels, fsample, thresh_factor=100, vis=False, gt=None, num_pts=None):
         self.num_channels = num_channels
         self.fs = fsample
         self.thresh_factor = thresh_factor
@@ -26,6 +26,8 @@ class SpikePreProcessor:
         window_radius = 1*10**(-3) #1ms window around each spike
         self.align_radius = int(self.fs * window_radius) #discrete window size
         self.vis = vis
+        self.gt = gt
+        self.num_pts = num_pts
     
     def __call__(self, raw_data, vis=None):
         '''
@@ -41,6 +43,8 @@ class SpikePreProcessor:
         ----------
         raw_data : ndarray (num_samples, num_channels)
             raw extracellular electrode recording
+        vis : Bool or None
+            If True, visualize preprocessing.
 
         Returns
         -------
@@ -59,9 +63,15 @@ class SpikePreProcessor:
         '''
         if vis is None:
             vis = self.vis
+            
         bp_data, lfp = self.filter_data(raw_data)
-        spike_indices = self.threshold(bp_data)
-        aligned_spikes, spike_times = self.align(bp_data, spike_indices)
+        
+        if not(self.gt is None):
+            aligned_spikes, spike_times = self.extract_from_gt(bp_data, self.gt, self.num_pts)
+        else:
+            spike_indices = self.threshold(bp_data)
+            aligned_spikes, spike_times = self.align(bp_data, spike_indices)
+            
         normed_spikes, normed_lfp, max_spike_voltages, max_lfp_voltages = self.normalize(aligned_spikes, lfp)
         if vis:
             self.visualize(raw_data, bp_data, normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages)
@@ -211,6 +221,45 @@ class SpikePreProcessor:
             spike_times.append(np.array(channel_spike_times))
         
         return aligned_spikes, spike_times
+    
+    def extract_from_gt(self, data, gt, num_pts):
+        '''
+        Extracts spikes and spike times from ground truth indices gt and given
+        number of points per spike num_pts.
+
+        Parameters
+        ----------
+        data : ndarray (num_samples, num_channels)
+            bandpass filtered voltage recordings
+        gt : list (num_channels)
+            list of ndarrays (num_spikes,) that contains indices for each spike.
+        num_pts : int
+            number of points that each spike has from indices listed in gt.
+
+        Returns
+        -------
+        spikes : list (num_channels)
+            list of ndarrays (num_spikes, num_pts) containing spikes.
+        spike_times : list (num_channels)
+            list of ndarrays (num_spikes,) containing spike times
+
+        '''
+        tmax = self.Ts*(data.shape[0]-1)
+        t = np.linspace(0, tmax, data.shape[0])
+        spikes = []
+        spike_times = []
+        for channel_num, channel in enumerate(gt):
+            channel_spikes = []
+            channel_spike_times = []
+            for idx in channel:
+                channel_spikes.append(data[idx:idx+num_pts, channel_num])
+                channel_spike_times.append(t[idx:idx+num_pts])
+            spikes.append(np.array(channel_spikes))
+            spike_times.append(np.array(channel_spike_times))
+            
+        return spikes, spike_times
+                
+            
         
     def normalize(self, aligned_spikes, lfp):
         '''
@@ -288,7 +337,10 @@ class SpikePreProcessor:
         num_samples = raw_data.shape[0]
         tmax = self.Ts * (num_samples-1)
         t = np.linspace(0, tmax, num_samples)
-        align_t = np.linspace(-1, 1, self.align_radius*2+1)
+        if not(self.gt is None):
+            align_t = np.linspace(0, (self.num_pts-1)*self.Ts, self.num_pts)
+        else:
+            align_t = np.linspace(-1, 1, self.align_radius*2+1)
         lfp_t = np.linspace(0, tmax, normed_lfp.shape[0])
         psi = self.neo(bp_data)
         sigma = np.median(np.abs(psi), axis=0) / 0.67
