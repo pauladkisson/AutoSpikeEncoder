@@ -15,7 +15,11 @@ import random
 script_dir = os.path.dirname(__file__)
 pedreira_path = os.path.join(script_dir, "pedreira")
 session_folder = random.choice(os.listdir(pedreira_path))
-while session_folder.startswith(".") or session_folder=="ground_truth" or session_folder.endswith(".doc"):
+while (
+    session_folder.startswith(".")
+    or session_folder == "ground_truth"
+    or session_folder.endswith(".doc")
+):
     session_folder = random.choice(os.listdir(pedreira_path))
 session_path = os.path.join(pedreira_path, session_folder)
 print(session_folder)
@@ -41,13 +45,11 @@ for channel_folder in os.listdir(session_path):
     channel_path = os.path.join(session_path, channel_folder)
     spike_times = np.load(os.path.join(channel_path, "spike_times.npy"))
     spikes = np.load(os.path.join(channel_path, "spikes.npy"))
-    
+
     plt.figure()
-    plt.title("Spikes Channel %s" %channel)
+    plt.title("Spikes Channel %s" % channel)
     plt.plot(np.transpose(spikes))
-    
+
     plt.figure()
-    plt.title("Local Field Potential Channel %s" %channel)
+    plt.title("Local Field Potential Channel %s" % channel)
     plt.plot(lfp[:, channel])
-    
-            
