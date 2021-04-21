@@ -293,6 +293,7 @@ class SpikePreProcessor:
                 max_voltage = np.max(np.abs(channel_spikes))
                 normed_spikes.append(channel_spikes / max_voltage)
             except ValueError: #No spikes detected
+                print("Breakpoint")
                 assert len(channel_spikes) == 0
                 max_voltage = np.nan
                 normed_spikes.append(np.array([]))

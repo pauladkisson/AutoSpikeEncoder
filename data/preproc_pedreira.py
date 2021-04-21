@@ -110,7 +110,7 @@ num_pts = 79
 
 urls = get_urls()
 urls.sort(key = lambda url: int(url.split('_')[-1].split('.')[0]))
-start_session = 0 #starting on a specific session number (index)
+start_session = 24 #starting on a specific session number (index)
 urls = urls[start_session:]
 
 #Ground Truth
@@ -131,7 +131,7 @@ for session_num, url in enumerate(urls):
     raw_data = pull_data(url)
     print("...Processing...")
     num_channels = raw_data.shape[1]
-    gt = spike_first_sample[0, session_num]
+    gt = spike_first_sample[0, session_num+start_session]
     preproc_pedreira = SpikePreProcessor(num_channels, fsample, vis=False, gt=gt, num_pts=num_pts)
     data = preproc_pedreira(raw_data)
     normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
