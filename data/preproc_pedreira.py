@@ -111,7 +111,7 @@ total_pts = fsample*10*60
 
 urls = get_urls()
 urls.sort(key = lambda url: int(url.split('_')[-1].split('.')[0]))
-start_session = 24 #starting on a specific session number (index)
+start_session = 0 #starting on a specific session number (index)
 urls = urls[start_session:]
 
 #Ground Truth
