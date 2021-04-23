@@ -10,12 +10,16 @@ class UnsupervisedDataset(Dataset):
     Load the alm1 data, either as single channels or multichannel.
     """
 
-    def __init__(self, input_dir: str, multichannel: bool = False):
+    def __init__(self, input_dir: str, multichannel: bool = False, load_embeddings=None):
         sessions = os.listdir(input_dir)
         self._multichannel = multichannel
         # maps a unique index to each example
         self._map = []
         self._input_dir = input_dir
+        if load_embeddings:
+            self.to_load = load_embeddings
+        else:
+            self.to_load = 'spikes.npy'
         sessions = list(filter(lambda x: 'session' in x, sessions))
         for session in sorted(sessions, key=lambda x: int(x.split('_')[1])):
             session_id = int(session.split('_')[1].strip())
@@ -44,6 +48,13 @@ class UnsupervisedDataset(Dataset):
                     'channel': channel_id}
         return info
 
+    def write(self, idx, embeddings, fname):
+        sess_id, trial_id, channel_id = self._map[idx]
+        trial_path = os.path.join(self._input_dir, 'session_' + str(sess_id), 'trial_' + str(trial_id))
+        channel_path = os.path.join(trial_path, 'channel_' + str(channel_id))
+        embed = np.array(embeddings)  # should be size num_spikes * embedding_dims
+        np.save(os.path.join(channel_path, fname), embed)
+
     def __len__(self):
         return len(self._map)
 
@@ -61,8 +72,10 @@ class UnsupervisedDataset(Dataset):
             raise NotImplementedError
         else:
             channel_path = os.path.join(trial_path, 'channel_' + str(channel_id))
-            channel_spikes = np.load(os.path.join(channel_path, 'spikes.npy'))
+            channel_spikes = np.load(os.path.join(channel_path, self.to_load))
             channel_spike_times = np.load(os.path.join(channel_path, 'spike_times.npy'))
 
         return channel_spikes, channel_spike_times
+
+
 
