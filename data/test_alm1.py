@@ -47,13 +47,11 @@ for channel_folder in os.listdir(trial_path):
     channel_path = os.path.join(trial_path, channel_folder)
     spike_times = np.load(os.path.join(channel_path, "spike_times.npy"))
     spikes = np.load(os.path.join(channel_path, "spikes.npy"))
-    
+
     plt.figure()
-    plt.title("Spikes Channel %s" %channel)
+    plt.title("Spikes Channel %s" % channel)
     plt.plot(np.transpose(spikes))
-    
+
     plt.figure()
-    plt.title("Local Field Potential Channel %s" %channel)
+    plt.title("Local Field Potential Channel %s" % channel)
     plt.plot(lfp[:, channel])
-    
-            
