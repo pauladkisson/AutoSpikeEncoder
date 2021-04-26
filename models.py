@@ -137,3 +137,20 @@ class DeepFFDecoder(BaseCoder):
         return out
 
 
+class KMeans(nn.Module):
+    """
+    Via the EM algorithm, finds k clusters
+    """
+    def __init__(self, k=2):
+        super().__init__()
+        self.k = 2
+
+    def fit(self):
+        raise NotImplementedError
+
+    def predict(self):
+        raise NotImplementedError
+
+
+
+
