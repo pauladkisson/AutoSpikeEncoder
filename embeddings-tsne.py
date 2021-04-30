@@ -39,17 +39,19 @@ for i, (spikes, targets) in enumerate(data):
     print(f"Learning manifold for latent embeddings")
     # latent_manifold = latent[:, :2]
     latent_manifold = tsne.fit_transform(latent.cpu())
-    
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-    for k, (manifold, manifold_name) in enumerate(zip([PCA_manifold, latent_manifold], ["PCA projections", "Latent features"])):
+    for k, (manifold, manifold_name) in enumerate(
+        zip([PCA_manifold, latent_manifold], ["PCA projections", "Latent features"])
+    ):
         ax = axes[k]
         for c in range(20):
             c_manifold = manifold[targets == c]
-            ax.scatter(c_manifold[:, 0], c_manifold[:, 1], marker=".", s=.5)
+            ax.scatter(c_manifold[:, 0], c_manifold[:, 1], marker=".", s=0.5)
         ax.set_xlabel("First dimension")
         ax.set_ylabel("Second dimension")
         ax.set_title(manifold_name)
-    
+
     plt.savefig(os.path.join("figures", f"{i}.png"))
     plt.show()
     plt.close()
