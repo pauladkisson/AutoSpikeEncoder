@@ -243,11 +243,9 @@ class SpikePreProcessor:
                 spike_time = t[new_spike_idx]
 
                 # ensure alignment produces correct spike
-                assert aligned_spike.shape == (
-                    self.align_radius * 2 + 1,
-                ), "aligned_spike.shape should be %s but it is %s instead." % (
-                    (self.align_radius * 2 + 1,),
-                    aligned_spike.shape,
+                assert aligned_spike.shape == (self.align_radius * 2 + 1,), (
+                    "aligned_spike.shape should be %s but it is %s instead."
+                    % ((self.align_radius * 2 + 1,), aligned_spike.shape,)
                 )
 
                 # record

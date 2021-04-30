@@ -8,10 +8,17 @@ from models import (
     IntermediateFFDecoder,
     DeepFFEncoder,
     DeepFFDecoder,
+    ShallowFFEncoder,
+    ShallowFFDecoder,
+    IntermediateFFEncoder,
+    IntermediateFFDecoder,
+    DeepFFEncoder,
+    DeepFFDecoder,
+    ShallowConvEncoder,
+    IntermediateConvEncoder,
+    DeepConvEncoder,
 )
-from datasets import UnsupervisedDataset
 import torch
-from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -22,7 +29,7 @@ def standardize(data: torch.Tensor):
     return data
 
 
-class FFAEEnsemble:
+class AEEnsemble:
     """
     Reproduce the AutoEncoder Paper.
     """
@@ -30,16 +37,24 @@ class FFAEEnsemble:
     def __init__(
         self,
         optim=None,
+        convolutional_encoding=True,
         batch_size=100,
         epochs=200,
         lr=(0.01, 0.01, 0.01),
         device="cpu",
     ):
-        self.encoders = [
-            ShallowFFEncoder(device=device),
-            IntermediateFFEncoder(device=device),
-            DeepFFEncoder(device=device),
-        ]
+        if convolutional_encoding:
+            self.encoders = [
+                ShallowConvEncoder(device=device),
+                IntermediateConvEncoder(device=device),
+                DeepConvEncoder(device=device),
+            ]
+        else:
+            self.encoders = [
+                ShallowFFEncoder(device=device),
+                IntermediateFFEncoder(device=device),
+                DeepFFEncoder(device=device),
+            ]
         self.decoders = [
             ShallowFFDecoder(device=device),
             IntermediateFFDecoder(device=device),
@@ -56,7 +71,7 @@ class FFAEEnsemble:
             for i in range(len(self.encoders))
         ]
         self.schedulers = [
-            torch.optim.lr_scheduler.StepLR(op, step_size=5, gamma=0.1)
+            torch.optim.lr_scheduler.StepLR(op, step_size=10, gamma=0.1)
             for op in self.optimizers
         ]
         self.batch_size = batch_size
@@ -99,7 +114,13 @@ class FFAEEnsemble:
         loss_history = [np.array(ae_hist) for ae_hist in loss_history]
         return loss_history
 
-    def predict(self, x: Dataset, return_embeddings=False, save_embeddings=True):
+    def predict(
+        self,
+        x: Dataset,
+        return_embeddings=False,
+        save_embeddings=True,
+        fname="embeddings_ff_ensemble.npy",
+    ):
         dataloader = DataLoader(x, batch_size=1, shuffle=True)
         map(lambda e: e.eval(), self.encoders)
         map(lambda d: d.eval(), self.decoders)
@@ -117,7 +138,7 @@ class FFAEEnsemble:
             latent_vecs = [encoder(spikes) for encoder in self.encoders]
             latent = torch.cat(latent_vecs, dim=1).detach().cpu()
             if save_embeddings:
-                x.write(idx, latent, fname="embeddings_ff_ensemble.npy")
+                x.write(idx, latent, fname=fname)
             if return_embeddings:
                 embeddings[idx] = latent
         if return_embeddings:
