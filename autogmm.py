@@ -1,4 +1,3 @@
-# Code available at https://github.com/ldeecke/gmm-torch
 import torch
 import numpy as np
 from gmm import GaussianMixture
