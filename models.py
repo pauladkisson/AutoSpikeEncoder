@@ -1,3 +1,5 @@
+from typing import Union
+
 import torch
 from torch import nn
 from abc import abstractproperty, abstractmethod
@@ -244,19 +246,3 @@ class DeepConvEncoder(BaseCoder):
         latent = end_pool(h).reshape(-1, 3)
 
         return latent
-
-
-class KMeans(nn.Module):
-    """
-    Via the EM algorithm, finds k clusters
-    """
-
-    def __init__(self, k=2):
-        super().__init__()
-        self.k = 2
-
-    def fit(self):
-        raise NotImplementedError
-
-    def predict(self):
-        raise NotImplementedError
