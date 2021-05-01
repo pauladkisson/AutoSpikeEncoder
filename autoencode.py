@@ -22,13 +22,6 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 
-def standardize(data: torch.Tensor):
-    dm = torch.mean(data, dim=0)
-    ds = torch.std(data, dim=0)
-    data = (data - dm) / ds
-    return data
-
-
 class AEEnsemble:
     """
     Reproduce the AutoEncoder Paper.
@@ -42,23 +35,24 @@ class AEEnsemble:
         epochs=200,
         lr=(0.01, 0.01, 0.01),
         device="cpu",
+        activ=torch.nn.Tanh
     ):
         if convolutional_encoding:
             self.encoders = [
-                ShallowConvEncoder(device=device),
-                IntermediateConvEncoder(device=device),
-                DeepConvEncoder(device=device),
+                ShallowConvEncoder(device=device, activ=activ),
+                IntermediateConvEncoder(device=device, activ=activ),
+                DeepConvEncoder(device=device, activ=activ),
             ]
         else:
             self.encoders = [
-                ShallowFFEncoder(device=device),
-                IntermediateFFEncoder(device=device),
-                DeepFFEncoder(device=device),
+                ShallowFFEncoder(device=device, activ=activ),
+                IntermediateFFEncoder(device=device, activ=activ),
+                DeepFFEncoder(device=device, activ=activ),
             ]
         self.decoders = [
-            ShallowFFDecoder(device=device),
-            IntermediateFFDecoder(device=device),
-            DeepFFDecoder(device=device),
+            ShallowFFDecoder(device=device, activ=activ),
+            IntermediateFFDecoder(device=device, activ=activ),
+            DeepFFDecoder(device=device, activ=activ),
         ]
         if not optim:
             optim = torch.optim.SGD
@@ -71,7 +65,7 @@ class AEEnsemble:
             for i in range(len(self.encoders))
         ]
         self.schedulers = [
-            torch.optim.lr_scheduler.StepLR(op, step_size=10, gamma=0.1)
+            torch.optim.lr_scheduler.StepLR(op, step_size=20, gamma=0.5)
             for op in self.optimizers
         ]
         self.batch_size = batch_size
@@ -82,8 +76,9 @@ class AEEnsemble:
         dataloader = DataLoader(x, batch_size=self.batch_size, shuffle=True)
         loss = torch.nn.MSELoss()
         loss_history = [[] for _ in range(len(self.encoders))]
-        map(lambda e: e.train(), self.encoders)
-        map(lambda d: d.train(), self.decoders)
+        for e, d in zip(self.encoders, self.decoders):
+            e.train()
+            d.train()
         for epoch in range(self.training_epochs):
             epoch_loss = [[] for _ in range(len(self.encoders))]
             print("\nEPOCH " + str(epoch + 1) + " of " + str(self.training_epochs))
@@ -93,7 +88,7 @@ class AEEnsemble:
                 for idx in batch:
                     sample = x[idx]
                     if sample[0].shape[0] > 1:
-                        data.append(standardize(torch.from_numpy(sample[0]).float()))
+                        data.append(torch.from_numpy(sample[0]).float())
                 if len(data) == 0:
                     continue
                 spikes = torch.cat(data, dim=0)
@@ -122,8 +117,9 @@ class AEEnsemble:
         fname="embeddings_ff_ensemble.npy",
     ):
         dataloader = DataLoader(x, batch_size=1, shuffle=True)
-        map(lambda e: e.eval(), self.encoders)
-        map(lambda d: d.eval(), self.decoders)
+        for e, d in zip(ae.encoders, ae.decoders):
+            e.eval()
+            d.eval()
         embeddings = [None] * len(x)
         for batch in dataloader.batch_sampler:
             idx = batch[0]
@@ -146,22 +142,22 @@ class AEEnsemble:
         else:
             return None
 
-    def save(self):
+    def save(self, prefix=""):
         for e in self.encoders:
             torch.save(
-                e.state_dict(), os.path.join("models", f"{e.__class__.__name__}.pth")
+                e.state_dict(), os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth")
             )
         for d in self.decoders:
             torch.save(
-                d.state_dict(), os.path.join("models", f"{d.__class__.__name__}.pth")
+                d.state_dict(), os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth")
             )
 
-    def load(self):
+    def load(self, prefix=""):
         for e in self.encoders:
             e.load_state_dict(
-                torch.load(os.path.join("models", f"{e.__class__.__name__}.pth"))
+                torch.load(os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth"))
             )
         for d in self.decoders:
             d.load_state_dict(
-                torch.load(os.path.join("models", f"{d.__class__.__name__}.pth"))
+                torch.load(os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth"))
             )
