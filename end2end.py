@@ -5,6 +5,7 @@ import torch
 from torch import nn
 import random
 import numpy as np
+from sklearn im
 
 from torch.utils.data import DataLoader, Dataset
 
@@ -22,6 +23,14 @@ def SMRE(data: torch.Tensor):
     smre = torch.pow(rtm, 2)
     smre = torch.mean(smre)
     return smre
+
+
+class End2End(nn.Module):
+
+    def __init__(self, encoders: List[BaseCoder], decoders: List[BaseCoder], cluster_loss_fxn, reconstruction_loss_fxn,
+                 min_k=2, max_k=20, epochs=50):
+        super().__init__()
+        self.ae_optimizer = torch.optim.SGD(lr=1e-5, params=)
 
 
 class SoftKMeans(nn.Module):
