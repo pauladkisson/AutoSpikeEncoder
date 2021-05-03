@@ -35,7 +35,7 @@ class AEEnsemble:
         epochs=200,
         lr=(0.01, 0.01, 0.01),
         device="cpu",
-        activ=torch.nn.Tanh
+        activ=torch.nn.Tanh,
     ):
         if convolutional_encoding:
             self.encoders = [
@@ -145,19 +145,25 @@ class AEEnsemble:
     def save(self, prefix=""):
         for e in self.encoders:
             torch.save(
-                e.state_dict(), os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth")
+                e.state_dict(),
+                os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth"),
             )
         for d in self.decoders:
             torch.save(
-                d.state_dict(), os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth")
+                d.state_dict(),
+                os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth"),
             )
 
     def load(self, prefix=""):
         for e in self.encoders:
             e.load_state_dict(
-                torch.load(os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth"))
+                torch.load(
+                    os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth")
+                )
             )
         for d in self.decoders:
             d.load_state_dict(
-                torch.load(os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth"))
+                torch.load(
+                    os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth")
+                )
             )

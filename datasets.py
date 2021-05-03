@@ -46,7 +46,11 @@ class UnsupervisedDataset(Dataset):
     """
 
     def __init__(
-        self, input_dir: str, multichannel: bool = False, load_embeddings=None, session_idx=[0]
+        self,
+        input_dir: str,
+        multichannel: bool = False,
+        load_embeddings=None,
+        session_idx=[0],
     ):
         sessions = os.listdir(input_dir)
         self._multichannel = multichannel
