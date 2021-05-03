@@ -15,7 +15,7 @@ class BaseCoder(nn.Module):
         self.input_dim = input_dim
         self.resize_input = resize_input
         self.activ = nn.Tanh()
-        self.lin_activ = nn.ReLU
+        self.relu = nn.ReLU()
 
 
 class ShallowFFEncoder(BaseCoder):
@@ -207,11 +207,11 @@ class ShallowConvEncoder(BaseCoder):
 
         h = self.conv3_1_16(x)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_16_3(h)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         spatial = h.shape[2]
 
@@ -245,14 +245,14 @@ class IntermediateConvEncoder(BaseCoder):
 
         h = self.conv3_1_16(x)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_16_16(h)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_16_3(h)
-        h = self.activ(h)
+        h = self.relu(h)
         spatial = h.shape[2]
 
         # reduce to 1 spatial dim
@@ -289,18 +289,18 @@ class DeepConvEncoder(BaseCoder):
 
         h = self.conv3_1_16(x)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_16_24(h)
         h = self.mpool3(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_24_16(h)
         h = self.mpool2(h)
-        h = self.activ(h)
+        h = self.relu(h)
 
         h = self.conv3_16_3(h)
-        h = self.activ(h)
+        h = self.relu(h)
         spatial = h.shape[2]
 
         # reduce to 1 spatial dim
