@@ -185,8 +185,6 @@ for session_num, url in enumerate(urls):
         channel_path.mkdir(parents=True, exist_ok=True)
         np.save(channel_pathname + "/spikes.npy", normed_spikes[channel])
         np.save(channel_pathname + "/spike_times.npy", spike_times[channel])
-    if session_num==1:
-        break
         
 # delete temps
 script_dir = os.path.dirname(__file__)
