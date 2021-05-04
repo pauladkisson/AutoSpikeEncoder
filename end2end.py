@@ -5,6 +5,7 @@ from autoencode import AEEnsemble
 import torch
 from torch import nn
 import random
+from itertools import chain
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from multiprocessing import Pool
@@ -12,15 +13,9 @@ from multiprocessing import Pool
 from torch.utils.data import DataLoader, Dataset
 
 
-def standardize(data: torch.Tensor):
-    dm = torch.mean(data, dim=0)
-    ds = torch.std(data, dim=0)
-    data = (data - dm) / ds
-    return data
-
-
-def SMRE(data: torch.Tensor):
-    rt = torch.pow(data, .5)
+def SMRE(data: torch.Tensor, centroids: torch.Tensor):
+    distances = torch.cdist(data, centroids, p=2)
+    rt = torch.sqrt(distances)
     rtm = torch.mean(rt, dim=1)
     smre = torch.pow(rtm, 2)
     smre = torch.mean(smre)
@@ -29,8 +24,8 @@ def SMRE(data: torch.Tensor):
 
 class End2End(nn.Module):
 
-    def __init__(self, cluster_loss_fxn, min_k=2, max_k=20, epochs=50, batch_size=100, device='cuda:0'):
-        super().__init__()
+    def __init__(self, cluster_loss_fxn=SMRE, min_k=2, max_k=20, alpha=.5, beta=.5, epochs=50, batch_size=100,
+                 device='cuda:0'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
             self.dev = torch.device(device)
@@ -38,181 +33,100 @@ class End2End(nn.Module):
             self.dev = torch.device("cpu")
         self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=20, device=device)
         self.loss_fxn = cluster_loss_fxn
+        self.reconstruct_loss = torch.nn.MSELoss()
         self.ae_initialized = False
         self.cluster_fit = False
         self.epochs = epochs
         self.batch_size = batch_size
         self.ks = list(range(min_k, max_k))
+        self.alpha = alpha
+        self.beta = beta
+        self.gmm_models = {k: GaussianMixture(n_components=k) for k in self.ks}
+        self.trained_encoders = {}
+        self.trained_decoders = {}
 
     def fit_autoencoder(self, x):
         self.AE_initializer.fit(x)
         self.ae_initialized = True
 
-    def fit_k(self, dataloader, k: int):
+    def fit_k(self, x, k):
         encoders = [e.clone() for e in self.AE_initializer.encoders]
         decoders = [d.clone() for d in self.AE_initializer.decoders]
-        optimizers = [torch.optim.SGD(lr=1e-5, params=list(encoders[i].parameters()) +
-                                                      list(decoders[i].parameters()))
-                      for i in range(len(encoders))]
-        gmm = GaussianMixture(n_components=k)
+        gmm = self.gmm_models[k]
+        optimizer = torch.optim.SGD(lr=1e-5,
+                                    params=list(chain.from_iterable([list(encoder.parameters())
+                                                                     for encoder in encoders])) +
+                                           list(chain.from_iterable([list(decoder.parameters())
+                                                                     for decoder in decoders]))
+                                    )
 
-        for batch in dataloader.batch_sampler:
-            for opt_k in optimizers:
-                map(lambda o: o.zero_grad(), opt_k)
+        for epoch in range(self.epochs):
+            optimizer.zero_grad()
             data = []
-            for idx in batch:
-                sample = dataloader.dataset[idx]
+            for sample in x:
                 if sample[0].shape[0] > 1:
-                    data.append(standardize(torch.from_numpy(sample[0]).float()))
+                    data.append(torch.from_numpy(sample[0]).float())
             if len(data) == 0:
                 continue
             raw_spikes = torch.cat(data, dim=0)
             raw_spikes = raw_spikes.to(self.dev)
             latent_vecs = [encoder(raw_spikes) for encoder in encoders]
+            reconstructions = [decoder(latent_vecs[i]) for i, decoder in enumerate(decoders)]
+            reconstruction_loss = torch.zeros(1)
+            for i in range(len(encoders)):
+                reconstruction_loss = reconstruction_loss + self.reconstruct_loss(raw_spikes, reconstructions[i])
+            latent_vecs = torch.cat(latent_vecs, dim=1)
             gmm.fit(latent_vecs)
+            centroids = gmm.means_
+            cluster_loss = self.loss_fxn(latent_vecs, centroids)
+            reconstruction_loss = reconstruction_loss / len(encoders)
+            print("Running Epoch #" + str(epoch) + " For K = " + str(k) +
+                  "\n Reconstruction Loss: " + str(reconstruction_loss.detach().cpu().item()) +
+                  "    Cluster Loss: " + str(cluster_loss.detach().cpu().item()))
+            loss = self.alpha * cluster_loss + self.beta * reconstruction_loss
+            loss.backward()
+            optimizer.step()
+        self.trained_encoders[gmm.n_components] = encoders
+        self.trained_decoders[gmm.n_components] = decoders
+
+    def bics(self, x):
+        bics = []
+        for k in self.ks:
+            _, bic = self.predict(x, k)
+            bics.append(bic)
+        return np.ndarray(bics)
 
     def fit(self, x):
         if not self.ae_initialized:
+            print("***INITIALIZING AUTOENCODER***")
             self.fit_autoencoder(x)
-        dataloader = DataLoader(x, batch_size=self.batch_size, shuffle=True)
         pool = Pool()
-        pool.map(self.fit_k, dataloader)
+        pool.starmap(self.fit_k, [tuple([Dataset]*len(self.ks)), self.ks])
 
+    def predict(self, x, k):
+        """
+        returns bayesian information criterion and cluster assignments for a given k
+        Parameters
+        ----------
+        x
 
+        Returns
+        -------
 
-class SoftKMeans(nn.Module):
-    """
-    Via the EM algorithm, finds k clusters
-    """
-
-    def __init__(self, k=2, embedding_modules: Union[List[BaseCoder], None] = None, optimize=True,
-                 device='cpu', **kwargs):
-        super().__init__()
-        self.k = k
-        self.embedding_modules = embedding_modules
-        self.embedding_module = embedding_modules[0]
-        self.decoding_module = embedding_modules[1]
-        self.device = device
-        if torch.cuda.is_available() and "cpu" not in device:
-            self.dev = torch.device(device)
-        else:
-            self.dev = torch.device("cpu")
-        if self.embedding_module:
-            self.optimizer = torch.optim.SGD(lr=1e-5, params=list(self.embedding_module.parameters()) + list(
-                self.decoding_module.parameters()))
-            self.dev = self.embedding_module.dev
-        self.epochs = kwargs.get('training_epochs', 1)
-        self.batch_size = kwargs.get('batch_size', -1)
-        self.centroids = None
-        self.optimize = optimize
-        self.mse_loss = torch.nn.MSELoss()
-
-    def _initialize_centroids(self, x):
-        # randomly select k points as the initial centroids
-        dataloader = DataLoader(x, batch_size=self.k, shuffle=True)
-        centroids = []
-        for sample in dataloader.batch_sampler:
-            for i in sample:
-                data = x[i]
-                if data[0].shape[0] < 1:
-                    break
-                idx = random.choice(list(range(len(data[0]))))
-                example = torch.from_numpy(data[0][idx])[None, :].float()
-                if self.embedding_module:
-                    with torch.no_grad():
-                        example = self.embedding_module(example)
-                centroids.append(example)
-                if len(centroids) == self.k:
-                    self.centroids = torch.cat(centroids, dim=0)
-                    return
-
-    def _expectation(self, spikes, optimize_embeddings=True, raw_spikes=None):
-        # finds distances from each point to each cluster center, can optimizes encoder to
-        # produce embeddings that are more "cluster-like"
-        raw_responsibility = torch.cdist(spikes, self.centroids, p=2)
-        pairwise = torch.pdist(spikes, p=2)
-        if self.embedding_module and optimize_embeddings:
-            # We want to produce nice neat clusters while also still maintaining reconstructing
-            cluster_score = SMRE(raw_responsibility)
-            spread_score = 1 / torch.mean(pairwise.view(-1))
-            clustering_objective = cluster_score + spread_score
-            if raw_spikes is None:
-                clustering_objective.backward(retain_graph=False)
-            else:
-                reconstructions = self.decoding_module(spikes)
-                resonstruction_objective = self.mse_loss(reconstructions, raw_spikes)
-                clustering_objective.backward(retain_graph=True)
-                resonstruction_objective.backward(retain_graph=False)
-            self.optimizer.step()
-        return raw_responsibility
-
-    def _maximization(self, spikes, responsibilities):
-        # adjust centroids to minimize distances to they're clusters
-        classification = torch.argmin(responsibilities, dim=1).reshape(-1)
-        centroids = torch.zeros((self.k, spikes[0].shape[0]), device=self.dev, requires_grad=False)
-        for i in range(self.k):
-            positions = spikes[classification == i]
-            with torch.no_grad():
-                centroids[i, :] = torch.mean(positions, dim=0)
-        # with torch.no_grad():
-        #     weights = torch.softmax(1 / responsibilities, dim=1).transpose(0, 1)[:, :, None]
-        #     pos_buff = spikes.repeat(self.k, 1, 1)
-        #     weighted_positions = torch.multiply(pos_buff, weights)
-        #     centroids = torch.sum(weighted_positions, dim=1) / torch.sum(weights, dim=1)
-        return centroids
-
-    def fit(self, x):
-        if self.batch_size == -1:
-            batch_size = len(x)
-        else:
-            batch_size = self.batch_size
-        dataloader = DataLoader(x, batch_size=batch_size, shuffle=True)
-        if self.embedding_module:
-            if self.optimize:
-                self.embedding_module.train()
-            else:
-                self.embedding_module.eval()
-        if self.centroids is None:
-            #  centroids must be initialized
-            self._initialize_centroids(x)
-        for epoch in range(self.epochs):
-            centroids = []
-            for batch in dataloader.batch_sampler:
-                data = []
-                for idx in batch:
-                    sample = x[idx]
-                    if sample[0].shape[0] > 1:
-                        data.append(standardize(torch.from_numpy(sample[0]).float()))
-                if len(data) == 0:
-                    continue
-                raw_spikes = torch.cat(data, dim=0)
-                if self.embedding_module:
-                    self.optimizer.zero_grad()
-                    spikes = self.embedding_module(raw_spikes)
-                else:
-                    spikes = raw_spikes
-                responsibility = self._expectation(spikes, raw_spikes=raw_spikes, optimize_embeddings=self.optimize)
-                centroids.append(self._maximization(spikes, responsibility)[None, :, :])
-            with torch.no_grad():
-                self.centroids = torch.mean(torch.cat(centroids, dim=0), dim=0)
-
-    def predict(self, x):
-        dataloader = DataLoader(x, batch_size=1, shuffle=True)
-        classifications = [list for _ in range(len(dataloader))]
-        if self.embedding_module:
-            self.embedding_module.eval()
-        for batch in dataloader.batch_sampler:
-            idx = batch[0]
-            idx = int(idx)
-            spikes, _ = x[idx]
-            if spikes.shape[0] == 0:
-                continue
-            spikes = torch.from_numpy(spikes).float()
-            if self.embedding_module:
-                with torch.no_grad():
-                    spikes = self.embedding_module(spikes)
-            if self.centroids is None:
-                raise RuntimeError('Must fit before predicting is possible')
-            responsibility = self._expectation(spikes, optimize_embeddings=False)
-            classifications[idx] = torch.argmin(responsibility, dim=1).reshape(-1).detach().cpu()
-        return classifications
+        """
+        data = []
+        try:
+            encoders = self.trained_encoders[k]
+        except IndexError:
+            raise RuntimeError("Must fit before predicting.")
+        for sample in x:
+            if sample[0].shape[0] > 1:
+                data.append(torch.from_numpy(sample[0]).float())
+        if len(data) == 0:
+            raise ValueError
+        raw_spikes = torch.cat(data, dim=0)
+        raw_spikes = raw_spikes.to(self.dev)
+        latent_vecs = [encoder(raw_spikes) for encoder in encoders]
+        assignments = self.gmm_models[k].predict(latent_vecs)
+        bic = self.gmm_models[k].bic(latent_vecs)
+        return assignments, bic

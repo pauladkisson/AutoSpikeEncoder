@@ -74,6 +74,7 @@ class AEEnsemble:
                 loss_history[i].append(np.mean(ae_loss))
             map(lambda s: s.step(), self.schedulers)
         loss_history = [np.array(ae_hist) for ae_hist in loss_history]
+        map(lambda o: o.zero_grad(), self.optimizers)
         return loss_history
 
     def predict(self, x: Dataset, return_embeddings=False, save_embeddings=True, fname='embeddings_ff_ensemble.npy'):
