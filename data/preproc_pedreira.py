@@ -9,10 +9,8 @@ Purpose: Pre-process simulated dataset from Pedreira et al. (2012)
     (https://www135.lamp.le.ac.uk/hgr3/).
 """
 import os
-import shutil
 from scipy.io import loadmat
 import numpy as np
-import tarfile
 import pathlib
 from bs4 import BeautifulSoup
 import requests
@@ -113,6 +111,7 @@ def get_urls():
 fsample = 24000
 num_pts = 79
 total_pts = fsample * 10 * 60
+extract_lfp = False
 
 urls = get_urls()
 urls.sort(key=lambda url: int(url.split("_")[-1].split(".")[0]))
@@ -155,6 +154,7 @@ for field, val in ground_truth.items():
     field_pathname = gt_pathname + "/" + field
     np.save(field_pathname, val)
 spike_first_sample = ground_truth["spike_first_sample"]
+spike_classes  = ground_truth["spike_classes"]
 
 # Simulated Data
 for session_num, url in enumerate(urls):
@@ -165,23 +165,29 @@ for session_num, url in enumerate(urls):
     print("...Processing...")
     num_channels = raw_data.shape[1]
     gt = spike_first_sample[0, session_num + start_session]
+    gt_classes = spike_classes[0, session_num + start_session]
     preproc_pedreira = SpikePreProcessor(
-        num_channels, fsample, vis=False, gt=gt, num_pts=num_pts
+        num_channels, fsample, vis=False, gt=gt, gt_classes=gt_classes, num_pts=num_pts, extract_lfp=extract_lfp
     )
     data = preproc_pedreira(raw_data)
-    normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages = data
+    normed_spikes, spike_times, normed_lfp, max_spike_voltages, max_lfp_voltages, snrs = data
     session_pathname = "pedreira/session_" + str(session_num + start_session)
     session_path = pathlib.Path(session_pathname)
     session_path.mkdir(parents=True, exist_ok=True)
-    np.save(session_pathname + "/lfp.npy", normed_lfp)
+    if extract_lfp:
+        np.save(session_pathname + "/lfp.npy", normed_lfp)
+        np.save(session_pathname + "/max_lfp_voltages.npy", max_lfp_voltages)
     np.save(session_pathname + "/max_spike_voltages.npy", max_spike_voltages)
-    np.save(session_pathname + "/max_lfp_voltages.npy", max_lfp_voltages)
+    np.save(session_pathname + "/snrs.npy", snrs)
     for channel in range(num_channels):
         channel_pathname = session_pathname + "/channel_" + str(channel)
         channel_path = pathlib.Path(channel_pathname)
         channel_path.mkdir(parents=True, exist_ok=True)
         np.save(channel_pathname + "/spikes.npy", normed_spikes[channel])
         np.save(channel_pathname + "/spike_times.npy", spike_times[channel])
+    if session_num==1:
+        break
+        
 # delete temps
 script_dir = os.path.dirname(__file__)
 download_path = os.path.join(script_dir, "temp.mat")

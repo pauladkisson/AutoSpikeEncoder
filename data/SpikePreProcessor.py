@@ -17,7 +17,7 @@ class SpikePreProcessor:
     """
 
     def __init__(
-        self, num_channels, fsample, thresh_factor=100, vis=False, gt=None, num_pts=None
+        self, num_channels, fsample, thresh_factor=100, vis=False, gt=None, gt_classes=None, num_pts=None, extract_lfp=False
     ):
         self.num_channels = num_channels
         self.fs = fsample
@@ -30,7 +30,9 @@ class SpikePreProcessor:
         self.align_radius = int(self.fs * window_radius)  # discrete window size
         self.vis = vis
         self.gt = gt
+        self.gt_classes = gt_classes
         self.num_pts = num_pts
+        self.extract_lfp = extract_lfp
 
     def __call__(self, raw_data, vis=None):
         """
@@ -73,6 +75,7 @@ class SpikePreProcessor:
             aligned_spikes, spike_times = self.extract_from_gt(
                 bp_data, self.gt, self.num_pts
             )
+            snrs = self.get_snr(bp_data, aligned_spikes, self.gt_classes)
         else:
             spike_indices = self.threshold(bp_data)
             aligned_spikes, spike_times = self.align(bp_data, spike_indices)
@@ -99,6 +102,7 @@ class SpikePreProcessor:
             normed_lfp,
             max_spike_voltages,
             max_lfp_voltages,
+            snrs
         )
 
     def filter_data(self, raw_data):
@@ -124,9 +128,12 @@ class SpikePreProcessor:
         lfp_cutoff = 100
         b, a = iirfilter(1, bp_cutoffs, fs=self.fs)
         bp_data = lfilter(b, a, raw_data, axis=0)
-        b, a = iirfilter(1, lfp_cutoff, fs=self.fs, btype="lowpass")
-        lfp_data = decimate(raw_data, self.downsample_factor, axis=0)
-        lfp_data = lfilter(b, a, lfp_data, axis=0)
+        if self.extract_lfp:
+            b, a = iirfilter(1, lfp_cutoff, fs=self.fs, btype="lowpass")
+            lfp_data = decimate(raw_data, self.downsample_factor, axis=0)
+            lfp_data = lfilter(b, a, lfp_data, axis=0)
+        else:
+            lfp_data = None
 
         return bp_data, lfp_data
 
@@ -302,6 +309,21 @@ class SpikePreProcessor:
             spike_times.append(np.array(channel_spike_times))
 
         return spikes, spike_times
+    
+    def get_snr(self, bp_data, spikes, gt_classes):
+        mads = np.median(np.abs(bp_data - np.mean(bp_data, axis=0)), axis=0)
+        sigmas = mads / 0.6745
+        snrs = []
+        for channel_gt, channel_spikes, channel_sigma in zip(gt_classes, spikes, sigmas):
+            channel_snrs = []
+            for unit in range(np.max(channel_gt)+1):
+                unit_spikes = channel_spikes[channel_gt==unit, :]
+                mean_waveform = np.mean(unit_spikes, axis=0)                
+                snr = np.max(np.abs(mean_waveform)) / channel_sigma
+                channel_snrs.append(snr)
+            snrs.append(channel_snrs)
+        snrs = np.array(snrs)
+        return np.max(snrs, axis=0)
 
     def normalize(self, aligned_spikes, lfp):
         """
@@ -340,13 +362,17 @@ class SpikePreProcessor:
                 normed_spikes.append(np.array([]))
             max_spike_voltages.append(max_voltage)
 
-        max_lfp_voltages = np.max(np.abs(lfp), axis=0)
-        dead_channel_mask = max_lfp_voltages == 0
-        max_lfp_voltages[
-            dead_channel_mask
-        ] = 1  # prevent division by 0 for dead channels
-        normed_lfp = lfp / max_lfp_voltages
-        max_lfp_voltages[dead_channel_mask] = 0  # recover dead channels
+        if self.extract_lfp:
+            max_lfp_voltages = np.max(np.abs(lfp), axis=0)
+            dead_channel_mask = max_lfp_voltages == 0
+            max_lfp_voltages[
+                dead_channel_mask
+            ] = 1  # prevent division by 0 for dead channels
+            normed_lfp = lfp / max_lfp_voltages
+            max_lfp_voltages[dead_channel_mask] = 0  # recover dead channels
+        else:
+            normed_lfp = None
+            max_lfp_voltages = None
 
         return normed_spikes, normed_lfp, np.array(max_spike_voltages), max_lfp_voltages
 
@@ -405,11 +431,12 @@ class SpikePreProcessor:
         plt.xlabel("Channel")
         plt.ylabel("Voltage")
 
-        plt.figure()
-        plt.plot(max_lfp_voltages)
-        plt.title("Max local field potentials used for normalization")
-        plt.xlabel("Channel")
-        plt.ylabel("Voltage")
+        if self.extract_lfp:
+            plt.figure()
+            plt.plot(max_lfp_voltages)
+            plt.title("Max local field potentials used for normalization")
+            plt.xlabel("Channel")
+            plt.ylabel("Voltage")
 
         for channel in range(self.num_channels):
             if np.all(raw_data[:, channel] == 0):  # dead channel
@@ -444,11 +471,12 @@ class SpikePreProcessor:
             plt.title("Detected Spikes : Channel %s" % channel)
             plt.legend(loc="center")
 
-            plt.figure()
-            plt.plot(lfp_t, normed_lfp[:, channel])
-            plt.xlabel("Time (s)")
-            plt.ylabel("Voltage (V)")
-            plt.title("Local Field Potential : Channel %s" % channel)
+            if self.extract_lfp:
+                plt.figure()
+                plt.plot(lfp_t, normed_lfp[:, channel])
+                plt.xlabel("Time (s)")
+                plt.ylabel("Voltage (V)")
+                plt.title("Local Field Potential : Channel %s" % channel)
 
             if normed_spikes[channel].size == 0:
                 print("Channel %s did not detect any spikes." % channel)

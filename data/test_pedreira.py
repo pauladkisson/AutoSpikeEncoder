@@ -33,6 +33,8 @@ spike_first_sample = np.load(
     os.path.join(gt_path, "spike_first_sample.npy"), allow_pickle=True
 )
 spike_classes = np.load(os.path.join(gt_path, "spike_classes.npy"), allow_pickle=True)
+snrs = np.load(os.path.join(session_path, "snrs.npy"))
+print("snrs=", snrs)
 
 plt.figure()
 plt.title("max_lfp_voltages")
