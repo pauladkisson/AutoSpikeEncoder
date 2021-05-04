@@ -1,11 +1,13 @@
 from typing import Union, List
 
 from models import BaseCoder
+from autoencode import AEEnsemble
 import torch
 from torch import nn
 import random
 import numpy as np
-from sklearn im
+from sklearn.mixture import GaussianMixture
+from multiprocessing import Pool
 
 from torch.utils.data import DataLoader, Dataset
 
@@ -27,10 +29,55 @@ def SMRE(data: torch.Tensor):
 
 class End2End(nn.Module):
 
-    def __init__(self, encoders: List[BaseCoder], decoders: List[BaseCoder], cluster_loss_fxn, reconstruction_loss_fxn,
-                 min_k=2, max_k=20, epochs=50):
+    def __init__(self, cluster_loss_fxn, min_k=2, max_k=20, epochs=50, batch_size=100, device='cuda:0'):
         super().__init__()
-        self.ae_optimizer = torch.optim.SGD(lr=1e-5, params=)
+        super().__init__()
+        if torch.cuda.is_available() and "cpu" not in device:
+            self.dev = torch.device(device)
+        else:
+            self.dev = torch.device("cpu")
+        self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=20, device=device)
+        self.loss_fxn = cluster_loss_fxn
+        self.ae_initialized = False
+        self.cluster_fit = False
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.ks = list(range(min_k, max_k))
+
+    def fit_autoencoder(self, x):
+        self.AE_initializer.fit(x)
+        self.ae_initialized = True
+
+    def fit_k(self, dataloader, k: int):
+        encoders = [e.clone() for e in self.AE_initializer.encoders]
+        decoders = [d.clone() for d in self.AE_initializer.decoders]
+        optimizers = [torch.optim.SGD(lr=1e-5, params=list(encoders[i].parameters()) +
+                                                      list(decoders[i].parameters()))
+                      for i in range(len(encoders))]
+        gmm = GaussianMixture(n_components=k)
+
+        for batch in dataloader.batch_sampler:
+            for opt_k in optimizers:
+                map(lambda o: o.zero_grad(), opt_k)
+            data = []
+            for idx in batch:
+                sample = dataloader.dataset[idx]
+                if sample[0].shape[0] > 1:
+                    data.append(standardize(torch.from_numpy(sample[0]).float()))
+            if len(data) == 0:
+                continue
+            raw_spikes = torch.cat(data, dim=0)
+            raw_spikes = raw_spikes.to(self.dev)
+            latent_vecs = [encoder(raw_spikes) for encoder in encoders]
+            gmm.fit(latent_vecs)
+
+    def fit(self, x):
+        if not self.ae_initialized:
+            self.fit_autoencoder(x)
+        dataloader = DataLoader(x, batch_size=self.batch_size, shuffle=True)
+        pool = Pool()
+        pool.map(self.fit_k, dataloader)
+
 
 
 class SoftKMeans(nn.Module):
@@ -51,7 +98,8 @@ class SoftKMeans(nn.Module):
         else:
             self.dev = torch.device("cpu")
         if self.embedding_module:
-            self.optimizer = torch.optim.SGD(lr=1e-5, params=list(self.embedding_module.parameters()) + list(self.decoding_module.parameters()))
+            self.optimizer = torch.optim.SGD(lr=1e-5, params=list(self.embedding_module.parameters()) + list(
+                self.decoding_module.parameters()))
             self.dev = self.embedding_module.dev
         self.epochs = kwargs.get('training_epochs', 1)
         self.batch_size = kwargs.get('batch_size', -1)
