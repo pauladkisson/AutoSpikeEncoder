@@ -46,7 +46,11 @@ class UnsupervisedDataset(Dataset):
     """
 
     def __init__(
-        self, input_dir: str, multichannel: bool = False, load_embeddings=None
+        self,
+        input_dir: str,
+        multichannel: bool = False,
+        load_embeddings=None,
+        session_idx=[0],
     ):
         sessions = os.listdir(input_dir)
         self._multichannel = multichannel
@@ -58,7 +62,11 @@ class UnsupervisedDataset(Dataset):
         else:
             self.to_load = "spikes.npy"
         sessions = list(filter(lambda x: "session" in x, sessions))
-        for session in sorted(sessions, key=lambda x: int(x.split("_")[1])):
+        sorted_sessions = sorted(sessions, key=lambda x: int(x.split("_")[1]))
+        selected_sessions = []
+        for idx in session_idx:
+            selected_sessions.append(sorted_sessions[idx])
+        for session in selected_sessions:
             session_id = int(session.split("_")[1].strip())
             sess_dir = os.path.join(input_dir, session)
             trials = os.listdir(sess_dir)
