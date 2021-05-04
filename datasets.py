@@ -1,7 +1,8 @@
 import os
 from typing import Tuple, Dict
-
+import torch
 from torch.utils.data import Dataset, DataLoader
+
 import numpy as np
 
 
@@ -54,6 +55,15 @@ class UnsupervisedDataset(Dataset):
         channel_path = os.path.join(trial_path, 'channel_' + str(channel_id))
         embed = np.array(embeddings)  # should be size num_spikes * embedding_dims
         np.save(os.path.join(channel_path, fname), embed)
+
+    def to_tensor(self):
+        data = []
+        for i in range(len(self)):
+            item, _ = self[i]
+            if len(item) > 0:
+                data.append(torch.from_numpy(item).float())
+        data = torch.cat(data, dim=0)
+        return data
 
     def __len__(self):
         return len(self._map)

@@ -2,6 +2,7 @@ from typing import Union, List
 
 from models import BaseCoder
 import copy
+import sys
 from autoencode import AEEnsemble
 import torch
 from torch import nn
@@ -9,23 +10,21 @@ import random
 from itertools import chain
 import numpy as np
 from sklearn.mixture import GaussianMixture
-from multiprocessing import Pool
+from torch.multiprocessing import Pool
 
 from torch.utils.data import DataLoader, Dataset
 
 
-def SMRE(data: torch.Tensor, centroids: torch.Tensor):
+def cluster_score(data: torch.Tensor, centroids: torch.Tensor):
     distances = torch.cdist(data, centroids, p=2)
-    rt = torch.sqrt(distances)
-    rtm = torch.mean(rt, dim=1)
-    smre = torch.pow(rtm, 2)
-    smre = torch.mean(smre)
-    return smre
+    clust = torch.mean(distances.view(-1))
+    spread = torch.mean((1 / (torch.pdist(centroids)**2)).view(-1))
+    return clust + spread
 
 
 class End2End(nn.Module):
 
-    def __init__(self, cluster_loss_fxn=SMRE, min_k=2, max_k=20, alpha=.5, beta=.5, epochs=50, batch_size=100,
+    def __init__(self, cluster_loss_fxn=cluster_score, min_k=2, max_k=20, alpha=.5, beta=.5, epochs=50, batch_size=100,
                  device='cuda:0'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
@@ -60,25 +59,18 @@ class End2End(nn.Module):
                                            list(chain.from_iterable([list(decoder.parameters())
                                                                      for decoder in decoders]))
                                     )
-
+        raw_spikes = x.to(self.dev)
         for epoch in range(self.epochs):
             optimizer.zero_grad()
-            data = []
-            for sample in x:
-                if sample[0].shape[0] > 1:
-                    data.append(torch.from_numpy(sample[0]).float())
-            if len(data) == 0:
-                continue
-            raw_spikes = torch.cat(data, dim=0)
-            raw_spikes = raw_spikes.to(self.dev)
             latent_vecs = [encoder(raw_spikes) for encoder in encoders]
             reconstructions = [decoder(latent_vecs[i]) for i, decoder in enumerate(decoders)]
             reconstruction_loss = torch.zeros(1)
             for i in range(len(encoders)):
                 reconstruction_loss = reconstruction_loss + self.reconstruct_loss(raw_spikes, reconstructions[i])
             latent_vecs = torch.cat(latent_vecs, dim=1)
-            gmm.fit(latent_vecs)
-            centroids = gmm.means_
+            np_latent_vecs = latent_vecs.detach().clone().numpy()
+            gmm.fit(np_latent_vecs)
+            centroids = torch.from_numpy(gmm.means_).float()
             cluster_loss = self.loss_fxn(latent_vecs, centroids)
             reconstruction_loss = reconstruction_loss / len(encoders)
             print("Running Epoch #" + str(epoch) + " For K = " + str(k) +
@@ -87,8 +79,7 @@ class End2End(nn.Module):
             loss = self.alpha * cluster_loss + self.beta * reconstruction_loss
             loss.backward()
             optimizer.step()
-        self.trained_encoders[gmm.n_components] = encoders
-        self.trained_decoders[gmm.n_components] = decoders
+        return encoders, decoders, gmm
 
     def bics(self, x):
         bics = []
@@ -97,12 +88,14 @@ class End2End(nn.Module):
             bics.append(bic)
         return np.ndarray(self.ks), np.ndarray(bics)
 
-    def fit(self, x):
+    def fit(self, X):
         if not self.ae_initialized:
             print("***INITIALIZING AUTOENCODER***")
-            #self.fit_autoencoder(x)
+            #self.fit_autoencoder(X)
+        mem_x = X.to_tensor()
         pool = Pool()
-        pool.starmap(self.fit_k, list(map(lambda p, y: (p, y), list([Dataset]*len(self.ks)), self.ks)))
+        results = pool.starmap(self.fit_k, list(map(lambda p, y: (p, y), list([mem_x]*len(self.ks)), self.ks)))
+
 
     def predict(self, x, k):
         """
@@ -138,7 +131,7 @@ if __name__ == '__main__':
     from matplotlib import pyplot as plt
     import pickle
     data = UnsupervisedDataset('./data/alm1/')
-    e2e = End2End(min_k=2, max_k=3, epochs=1, device='cpu')
+    e2e = End2End(min_k=2, max_k=3, epochs=2, device='cpu')
     e2e.fit(data)
     ks, bics = e2e.bics(data)
     plt.plot(ks, bics)
