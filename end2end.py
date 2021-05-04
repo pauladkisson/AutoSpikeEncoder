@@ -1,6 +1,7 @@
 from typing import Union, List
 
 from models import BaseCoder
+import copy
 from autoencode import AEEnsemble
 import torch
 from torch import nn
@@ -31,7 +32,7 @@ class End2End(nn.Module):
             self.dev = torch.device(device)
         else:
             self.dev = torch.device("cpu")
-        self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=20, device=device)
+        self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=1, device=device)
         self.loss_fxn = cluster_loss_fxn
         self.reconstruct_loss = torch.nn.MSELoss()
         self.ae_initialized = False
@@ -50,8 +51,8 @@ class End2End(nn.Module):
         self.ae_initialized = True
 
     def fit_k(self, x, k):
-        encoders = [e.clone() for e in self.AE_initializer.encoders]
-        decoders = [d.clone() for d in self.AE_initializer.decoders]
+        encoders = [copy.deepcopy(e) for e in self.AE_initializer.encoders]
+        decoders = [copy.deepcopy(d) for d in self.AE_initializer.decoders]
         gmm = self.gmm_models[k]
         optimizer = torch.optim.SGD(lr=1e-5,
                                     params=list(chain.from_iterable([list(encoder.parameters())
@@ -94,14 +95,14 @@ class End2End(nn.Module):
         for k in self.ks:
             _, bic = self.predict(x, k)
             bics.append(bic)
-        return np.ndarray(bics)
+        return np.ndarray(self.ks), np.ndarray(bics)
 
     def fit(self, x):
         if not self.ae_initialized:
             print("***INITIALIZING AUTOENCODER***")
-            self.fit_autoencoder(x)
+            #self.fit_autoencoder(x)
         pool = Pool()
-        pool.starmap(self.fit_k, [tuple([Dataset]*len(self.ks)), self.ks])
+        pool.starmap(self.fit_k, list(map(lambda p, y: (p, y), list([Dataset]*len(self.ks)), self.ks)))
 
     def predict(self, x, k):
         """
@@ -130,3 +131,19 @@ class End2End(nn.Module):
         assignments = self.gmm_models[k].predict(latent_vecs)
         bic = self.gmm_models[k].bic(latent_vecs)
         return assignments, bic
+
+
+if __name__ == '__main__':
+    from datasets import UnsupervisedDataset
+    from matplotlib import pyplot as plt
+    import pickle
+    data = UnsupervisedDataset('./data/alm1/')
+    e2e = End2End(min_k=2, max_k=3, epochs=1, device='cpu')
+    e2e.fit(data)
+    ks, bics = e2e.bics(data)
+    plt.plot(ks, bics)
+    with open('./local/e2e_unsup_mk1.pkl', 'wb') as f:
+        pickle.dump(e2e, f)
+
+
+
