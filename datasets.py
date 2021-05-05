@@ -123,3 +123,40 @@ class UnsupervisedDataset(Dataset):
             channel_spike_times = np.load(os.path.join(channel_path, "spike_times.npy"))
 
         return channel_spikes, channel_spike_times
+    
+class BenchmarkDataset(Dataset): #add SNR
+    """
+    Load the Pedreira data with ground truth.
+    N.B. the original spike traces are downsampled from 79 to the input
+    dimension of the autoencoders.
+    Also returns SNR's (snrs) and number of units (num_units)
+    """
+
+    def __init__(self, input_dir: str, input_dim: int = 39):
+        self._input_dim = input_dim
+        self._input_dir = input_dir
+        folders = os.listdir(input_dir)
+        self.spike_classes = np.load(
+            os.path.join(input_dir, "ground_truth", "spike_classes.npy"),
+            allow_pickle=True,
+        ).squeeze()
+        sessions = list(filter(lambda x: "session" in x, folders))
+        self.sessions = sorted(sessions, key=lambda x: int(x.split("_")[1]))
+        self.num_units = [np.max(sesh_spike_classes) for sesh_spike_classes in self.spike_classes]
+        self.num_units = np.array(self.num_units)
+
+    def __len__(self):
+        return len(self.sessions)
+
+    def __getitem__(self, idx: int):
+        session_dir = os.path.join(self._input_dir, self.sessions[idx])
+        channel_dir = os.path.join(session_dir, "channel_0")
+
+        spikes = np.load(
+            os.path.join(channel_dir, "spikes.npy"), allow_pickle=True
+        ).squeeze()
+        spikes = np.array([signal.resample(spike, self._input_dim) for spike in spikes])
+        snrs = np.load(os.path.join(session_dir, "snrs.npy"), allow_pickle=True)
+        targets = self.spike_classes[idx].squeeze()
+        num_units = self.num_units[idx]
+        return spikes, targets, snrs, num_units

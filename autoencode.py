@@ -20,6 +20,7 @@ from models import (
 )
 import torch
 from torch.utils.data import DataLoader, Dataset
+from sklearn.mixture import GaussianMixture
 
 
 class AEEnsemble:
@@ -142,28 +143,108 @@ class AEEnsemble:
         else:
             return None
 
-    def save(self, prefix=""):
+    def save(self, prefix="", on_drive=False):
+        if on_drive:
+            base_path = "./gdrive/MyDrive/models"
+        else:
+            base_path = "models"
         for e in self.encoders:
             torch.save(
                 e.state_dict(),
-                os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth"),
+                os.path.join(base_path, f"{prefix}_{e.__class__.__name__}.pth"),
             )
         for d in self.decoders:
             torch.save(
                 d.state_dict(),
-                os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth"),
+                os.path.join(base_path, f"{prefix}_{d.__class__.__name__}.pth"),
             )
 
-    def load(self, prefix=""):
+    def load(self, prefix="", on_drive=False):
+        if on_drive:
+            base_path = "./gdrive/MyDrive/models"
+        else:
+            base_path = "models"
         for e in self.encoders:
             e.load_state_dict(
                 torch.load(
-                    os.path.join("models", f"{prefix}_{e.__class__.__name__}.pth")
+                    os.path.join(base_path, f"{prefix}_{e.__class__.__name__}.pth")
                 )
             )
         for d in self.decoders:
             d.load_state_dict(
                 torch.load(
-                    os.path.join("models", f"{prefix}_{d.__class__.__name__}.pth")
+                    os.path.join(base_path, f"{prefix}_{d.__class__.__name__}.pth")
                 )
             )
+            
+    def benchmark(self, min_snr, train_data, test_data, on_drive=False):        
+        ###Setup AE Ensemble
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        ae = AEEnsemble(
+            optim=torch.optim.Adam,
+            convolutional_encoding=False, 
+            batch_size=32, 
+            epochs=50, 
+            lr=(0.001, 0.001, 0.001),
+            device=device, 
+            activ=torch.nn.ReLU
+        )
+        
+        ###Train AE ensemble, dropping units below min_snr
+        dataloader = DataLoader(train_data, batch_size=ae.batch_size, shuffle=True)
+        testloader = DataLoader(test_data, batch_size=ae.batch_size)
+        loss = torch.nn.MSELoss()
+        for e, d in zip(ae.encoders, ae.decoders):
+            e.train()
+            d.train()
+        for epoch in range(ae.training_epochs):
+            print("\nEPOCH " + str(epoch + 1) + " of " + str(ae.training_epochs))
+            for batch in dataloader.batch_sampler:
+                map(lambda o: o.zero_grad(), ae.optimizers)
+                data = []
+                for idx in batch:
+                    spikes, targets, snrs, num_units = train_data[idx]
+                    possible_targets = np.arange(len(snrs))
+                    hi_fidel_targets = possible_targets[snrs>=min_snr]
+                    spikes = spikes[np.isin(targets, hi_fidel_targets)]
+                    if spikes[0].shape[0] > 1:
+                        data.append(torch.from_numpy(spikes).float())
+                if len(data) == 0:
+                    continue
+                spikes = torch.cat(data, dim=0)
+                if "cuda" in ae.device:
+                    spikes = spikes.cuda(0)
+                latent_vecs = [encoder(spikes) for encoder in ae.encoders]
+                renconstructed = [
+                    decoder(latent_vecs[i]) for i, decoder in enumerate(ae.decoders)
+                ]
+                losses = [loss(spikes, r) for r in renconstructed]
+                for i in range(len(losses)):
+                    losses[i].backward()
+                    ae.optimizers[i].step()
+            map(lambda s: s.step(), ae.schedulers)
+        for e, d in zip(ae.encoders, ae.decoders):
+            e.eval()
+            d.eval()
+        ae.save(prefix="benchmark_snr_%s"%min_snr, on_drive=on_drive)
+        
+        ###Embed test_data using AE ensemble
+        latent_vecs = []
+        test_targets = []
+        for spikes, targets, snrs, num_units in test_data:
+            session_latent = []
+            possible_targets = np.arange(len(snrs))
+            hi_fidel_targets = possible_targets[snrs>=min_snr]
+            spikes = torch.FloatTensor(spikes[np.isin(targets, hi_fidel_targets)])
+            session_targets = targets[np.isin(targets, hi_fidel_targets)]
+            if "cuda" in ae.device:
+                spikes = spikes.cuda(0)
+            for encoder in ae.encoders:
+                session_latent.append(encoder(spikes))
+            session_latent = torch.cat(session_latent, dim=1).detach().cpu()
+            latent_vecs.append(session_latent)
+            test_targets.append(session_targets)
+        
+        return latent_vecs, test_targets
+        
+        
