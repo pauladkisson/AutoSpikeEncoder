@@ -1,9 +1,40 @@
-#Code taken from https://github.com/KaiyangZhou/pytorch-center-loss and modified for gmm
+# Code taken from https://github.com/KaiyangZhou/pytorch-center-loss and modified for gmm
 import torch
 import torch.nn as nn
 import numpy as np
 from sklearn.mixture import GaussianMixture
 
+
+def center_loss_fxn(x, labels, centers):
+    """
+    Parameters
+    ----------
+    x: The data points
+    labels: Labels for data points, from clustering or ground truth data
+    centers: centroids from clustering or evenly spaced points if supervised
+
+    Returns
+    -------
+
+    """
+    k = len(centers)
+    batch_size = len(x)
+    distmat = torch.pow(x, 2).sum(dim=1,
+                                  keepdim=True).expand(batch_size, k) + \
+              torch.pow(centers, 2).sum(dim=1,
+                                        keepdim=True).expand(batch_size, k).t()
+    mat = torch.matmul(x, centers.t())
+
+    distmat = distmat - 2 * mat
+
+    classes = torch.arange(k).long()
+    labels = labels.unsqueeze(1).expand(batch_size, k)
+    mask = labels.eq(classes.expand(batch_size, k))
+
+    dist = distmat * mask.float()
+    loss = dist.clamp(min=1e-12, max=1e+12).sum() / batch_size
+
+    return loss
 
 class CenterLoss_gmm(nn.Module):
     """Center loss.
@@ -15,6 +46,7 @@ class CenterLoss_gmm(nn.Module):
         num_classes (int): number of classes.
         feat_dim (int): feature dimension.
     """
+
     def __init__(self, n_components=10, feat_dim=2, use_gpu=True):
         super(CenterLoss_gmm, self).__init__()
         self.n_components = n_components
@@ -37,14 +69,20 @@ class CenterLoss_gmm(nn.Module):
         labels = model.fit_predict(n_latent)
         labels = torch.from_numpy(labels).float().requires_grad_()
         self.centers = torch.from_numpy(model.means_).float().requires_grad_()
+
         if self.use_gpu:
             labels = labels.cuda()
             self.centers = self.centers.cuda()
-        
-        distmat = torch.pow(x, 2).sum(dim=1, keepdim=True).expand(batch_size, self.n_components) + \
-                  torch.pow(self.centers, 2).sum(dim=1, keepdim=True).expand(self.n_components, batch_size).t()
-        mat = torch.matmul(x,centers.t())
-        distmat = distmat -2*mat
+
+        distmat = torch.pow(x, 2).sum(dim=1,
+                                      keepdim=True).expand(batch_size,
+                                                           self.n_components) + \
+                  torch.pow(self.centers,
+                            2).sum(dim=1,
+                                   keepdim=True).expand(self.n_components,
+                                                        batch_size).t()
+        mat = torch.matmul(x, self.centers.t())
+        distmat = distmat - 2 * mat
 
         classes = torch.arange(self.n_components).long()
         if self.use_gpu: classes = classes.cuda()
