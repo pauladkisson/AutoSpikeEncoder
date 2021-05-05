@@ -19,10 +19,11 @@ def center_loss_fxn(x, labels, centers):
     """
     k = len(centers)
     batch_size = len(x)
-    distmat = torch.pow(x, 2).sum(dim=1,
-                                  keepdim=True).expand(batch_size, k) + \
-              torch.pow(centers, 2).sum(dim=1,
-                                        keepdim=True).expand(batch_size, k).t()
+    point_ssd = torch.pow(x, 2).sum(dim=1, keepdim=True)
+    center_ssd = torch.pow(centers, 2).sum(dim=1, keepdim=True).t()
+    point_ssd = point_ssd.expand(batch_size, k)
+    center_ssd = center_ssd.expand(batch_size, k)
+    distmat = point_ssd + center_ssd
     mat = torch.matmul(x, centers.t())
 
     distmat = distmat - 2 * mat

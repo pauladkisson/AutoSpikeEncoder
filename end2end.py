@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.mixture import GaussianMixture
 from torch import multiprocessing as mp
 from torch.multiprocessing import Pool
-
+from centerloss_gmm import center_loss_fxn
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -28,7 +28,7 @@ def cluster_score(data: torch.Tensor, centroids: torch.Tensor):
 
 class End2End(nn.Module):
 
-    def __init__(self, cluster_loss_fxn=cluster_score, min_k=2, max_k=20, alpha=.5, beta=.5, epochs=50, batch_size=100,
+    def __init__(self, cluster_loss_fxn=center_loss_fxn, min_k=2, max_k=20, alpha=10, beta=2.5, epochs=50,
                  device='cpu'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
@@ -41,7 +41,6 @@ class End2End(nn.Module):
         self.ae_initialized = False
         self.cluster_fit = False
         self.epochs = epochs
-        self.batch_size = batch_size
         self.ks = list(range(min_k, max_k))
         self.alpha = alpha
         self.beta = beta
@@ -57,7 +56,7 @@ class End2End(nn.Module):
         encoders = [copy.deepcopy(e) for e in self.AE_initializer.encoders]
         decoders = [copy.deepcopy(d) for d in self.AE_initializer.decoders]
         gmm = self.gmm_models[k]
-        optimizer = torch.optim.SGD(lr=1e-5,
+        optimizer = torch.optim.SGD(lr=1e-2,
                                     params=list(chain.from_iterable([list(encoder.parameters())
                                                                      for encoder in encoders])) +
                                            list(chain.from_iterable([list(decoder.parameters())
@@ -73,13 +72,13 @@ class End2End(nn.Module):
                 reconstruction_loss = reconstruction_loss + self.reconstruct_loss(raw_spikes, reconstructions[i])
             latent_vecs = torch.cat(latent_vecs, dim=1)
             np_latent_vecs = latent_vecs.detach().clone().numpy()
-            gmm.fit(np_latent_vecs)
+            labels = torch.from_numpy(gmm.fit_predict(np_latent_vecs))
             centroids = torch.from_numpy(gmm.means_).float()
-            cluster_loss = self.loss_fxn(latent_vecs, centroids)
+            cluster_loss = self.loss_fxn(latent_vecs, labels, centroids)
             reconstruction_loss = reconstruction_loss / len(encoders)
             print("Running Epoch #" + str(epoch) + " For K = " + str(k) +
                   "\n Reconstruction Loss: " + str(reconstruction_loss.detach().cpu().item()) +
-                  "    Cluster Loss: " + str(cluster_loss.detach().cpu().item()))
+                  "    Center Loss: " + str(cluster_loss.detach().cpu().item()))
             loss = self.alpha * cluster_loss + self.beta * reconstruction_loss
             loss.backward()
             optimizer.step()
@@ -90,7 +89,7 @@ class End2End(nn.Module):
         for k in self.ks:
             _, bic = self.predict(x, k)
             bics.append(bic)
-        return np.ndarray(self.ks), np.ndarray(bics)
+        return np.array(self.ks), np.array(bics)
 
     def fit(self, X):
         mp.set_start_method('spawn')
@@ -133,13 +132,13 @@ if __name__ == '__main__':
     from datasets import UnsupervisedDataset
     from matplotlib import pyplot as plt
     import pickle
-    data = UnsupervisedDataset('./data/alm1/')
-    e2e = End2End(min_k=2, max_k=4, epochs=50, device='cpu')
+    data = UnsupervisedDataset('./data/alm1_medium/')
+    e2e = End2End(min_k=2, max_k=6, epochs=100, device='cpu')
     e2e.fit(data)
     with open('./local/e2e_unsup_mk1.pkl', 'wb') as f:
         pickle.dump(e2e, f)
     ks, bics = e2e.bics(data)
-    plt.plot(ks, bics)
-
+    plt.scatter(ks, bics)
+    plt.show()
 
 
