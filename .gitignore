@@ -130,3 +130,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Figures
+figures/
+
+# Data
+alm1/
+pedreira/
