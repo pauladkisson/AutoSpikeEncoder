@@ -177,34 +177,23 @@ class AEEnsemble:
                 )
             )
             
-    def benchmark(self, min_snr, train_data, test_data, on_drive=False):        
-        ###Setup AE Ensemble
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        ae = AEEnsemble(
-            optim=torch.optim.Adam,
-            convolutional_encoding=False, 
-            batch_size=32, 
-            epochs=50, 
-            lr=(0.001, 0.001, 0.001),
-            device=device, 
-            activ=torch.nn.ReLU
-        )
-        
+    def benchmark(self, min_snr, train_data, test_data, on_drive=False):                
         ###Train AE ensemble, dropping units below min_snr
-        dataloader = DataLoader(train_data, batch_size=ae.batch_size, shuffle=True)
-        testloader = DataLoader(test_data, batch_size=ae.batch_size)
+        dataloader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
         loss = torch.nn.MSELoss()
-        for e, d in zip(ae.encoders, ae.decoders):
+        for e, d in zip(self.encoders, self.decoders):
             e.train()
             d.train()
-        for epoch in range(ae.training_epochs):
-            print("\nEPOCH " + str(epoch + 1) + " of " + str(ae.training_epochs))
+        for epoch in range(self.training_epochs):
+            print("\nEPOCH " + str(epoch + 1) + " of " + str(self.training_epochs))
             for batch in dataloader.batch_sampler:
-                map(lambda o: o.zero_grad(), ae.optimizers)
+                map(lambda o: o.zero_grad(), self.optimizers)
                 data = []
                 for idx in batch:
                     spikes, targets, snrs, num_units = train_data[idx]
                     possible_targets = np.arange(len(snrs))
+                    if not(np.any(snrs>=min_snr)): #spike sessions with no units above SNR threshold
+                        continue
                     hi_fidel_targets = possible_targets[snrs>=min_snr]
                     spikes = spikes[np.isin(targets, hi_fidel_targets)]
                     if spikes[0].shape[0] > 1:
@@ -212,21 +201,21 @@ class AEEnsemble:
                 if len(data) == 0:
                     continue
                 spikes = torch.cat(data, dim=0)
-                if "cuda" in ae.device:
+                if "cuda" in self.device:
                     spikes = spikes.cuda(0)
-                latent_vecs = [encoder(spikes) for encoder in ae.encoders]
+                latent_vecs = [encoder(spikes) for encoder in self.encoders]
                 renconstructed = [
-                    decoder(latent_vecs[i]) for i, decoder in enumerate(ae.decoders)
+                    decoder(latent_vecs[i]) for i, decoder in enumerate(self.decoders)
                 ]
                 losses = [loss(spikes, r) for r in renconstructed]
                 for i in range(len(losses)):
                     losses[i].backward()
-                    ae.optimizers[i].step()
-            map(lambda s: s.step(), ae.schedulers)
-        for e, d in zip(ae.encoders, ae.decoders):
+                    self.optimizers[i].step()
+            map(lambda s: s.step(), self.schedulers)
+        for e, d in zip(self.encoders, self.decoders):
             e.eval()
             d.eval()
-        ae.save(prefix="benchmark_snr_%s"%min_snr, on_drive=on_drive)
+        self.save(prefix="benchmark_snr_%s"%min_snr, on_drive=on_drive)
         
         ###Embed test_data using AE ensemble
         latent_vecs = []
@@ -234,12 +223,14 @@ class AEEnsemble:
         for spikes, targets, snrs, num_units in test_data:
             session_latent = []
             possible_targets = np.arange(len(snrs))
+            if not(np.any(snrs>=min_snr)): #spike sessions with no units above SNR threshold
+                continue
             hi_fidel_targets = possible_targets[snrs>=min_snr]
             spikes = torch.FloatTensor(spikes[np.isin(targets, hi_fidel_targets)])
             session_targets = targets[np.isin(targets, hi_fidel_targets)]
-            if "cuda" in ae.device:
+            if "cuda" in self.device:
                 spikes = spikes.cuda(0)
-            for encoder in ae.encoders:
+            for encoder in self.encoders:
                 session_latent.append(encoder(spikes))
             session_latent = torch.cat(session_latent, dim=1).detach().cpu()
             latent_vecs.append(session_latent)
