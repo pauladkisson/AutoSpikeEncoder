@@ -6,30 +6,17 @@ import sys
 from autoencode import AEEnsemble
 import torch
 from torch import nn
-import random
 from itertools import chain
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from torch import multiprocessing as mp
 from torch.multiprocessing import Pool
 from centerloss_gmm import center_loss_fxn
-from torch.utils.data import DataLoader, Dataset
-
-
-def cluster_score(data: torch.Tensor, centroids: torch.Tensor):
-    distances = torch.cdist(data, centroids, p=2)
-    root_dists = torch.sqrt(distances)
-    sum_root_dist = torch.sum(root_dists, dim=1)
-    smre = sum_root_dist ** 2
-    clust = torch.mean(smre)
-    spread = torch.mean((1 / (torch.pdist(centroids)**2)).view(-1))
-    return clust + spread
 
 
 class End2End(nn.Module):
 
-    def __init__(self, cluster_loss_fxn=center_loss_fxn, min_k=2, max_k=20, alpha=10, beta=2.5, epochs=50,
-                 device='cpu'):
+    def __init__(self, cluster_loss_fxn=center_loss_fxn, min_k=2, max_k=20, alpha=10, beta=2.5, epochs=50, device='cpu'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
             self.dev = torch.device(device)
@@ -105,8 +92,7 @@ class End2End(nn.Module):
             self.trained_decoders[k] = decoders
             self.gmm_models[k]= gmm
 
-
-    def predict(self, x, k):
+    def predict(self, x, k, return_latent=False):
         """
         returns bayesian information criterion and cluster assignments for a given k
         Parameters
@@ -125,15 +111,18 @@ class End2End(nn.Module):
         np_latent_vecs = latent_vecs.detach().clone().numpy()
         assignments = self.gmm_models[k].predict(np_latent_vecs)
         bic = self.gmm_models[k].bic(np_latent_vecs)
-        return assignments, bic
+        if return_latent:
+            return assignments, bic, np_latent_vecs
+        else:
+            return assignments, bic
 
 
 if __name__ == '__main__':
     from datasets import UnsupervisedDataset
     from matplotlib import pyplot as plt
     import pickle
-    data = UnsupervisedDataset('./data/alm1_medium/')
-    e2e = End2End(min_k=2, max_k=6, epochs=100, device='cpu')
+    data = UnsupervisedDataset('./data/alm1_medium/', requested_channels=(4,))
+    e2e = End2End(min_k=2, max_k=10, epochs=50, device='cpu')
     e2e.fit(data)
     with open('./local/e2e_unsup_mk1.pkl', 'wb') as f:
         pickle.dump(e2e, f)

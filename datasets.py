@@ -47,7 +47,7 @@ class UnsupervisedDataset(Dataset):
     """
 
     def __init__(
-        self, input_dir: str, multichannel: bool = False, load_embeddings=None
+        self, input_dir: str, requested_channels=(0,), multichannel: bool = False, load_embeddings=None
     ):
         sessions = os.listdir(input_dir)
         self._multichannel = multichannel
@@ -73,8 +73,9 @@ class UnsupervisedDataset(Dataset):
                     channels = os.listdir(trial_dir)
                     channels = list(filter(lambda x: "channel" in x, channels))
                     for channel in sorted(channels, key=lambda x: int(x.split("_")[1])):
-                        channel_id = int(channel.split("_")[1].strip())
-                        self._map.append((session_id, trial_id, channel_id))
+                        if int(channel.split("_")[1]) in requested_channels:
+                            channel_id = int(channel.split("_")[1].strip())
+                            self._map.append((session_id, trial_id, channel_id))
 
     def get_item_info(self, idx: int) -> Dict[str, int]:
         if self._multichannel:
