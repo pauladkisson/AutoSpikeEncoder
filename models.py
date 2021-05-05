@@ -134,6 +134,7 @@ class DeepFFDecoder(BaseCoder):
         h = self.activ(h)
         h = self.h16(h)
         h = self.activ(h)
+        h = self.activ(h)
         h = self.h24(h)
         h = self.activ(h)
         out = self.h_out(h)

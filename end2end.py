@@ -10,6 +10,7 @@ import random
 from itertools import chain
 import numpy as np
 from sklearn.mixture import GaussianMixture
+from torch import multiprocessing as mp
 from torch.multiprocessing import Pool
 
 from torch.utils.data import DataLoader, Dataset
@@ -17,7 +18,10 @@ from torch.utils.data import DataLoader, Dataset
 
 def cluster_score(data: torch.Tensor, centroids: torch.Tensor):
     distances = torch.cdist(data, centroids, p=2)
-    clust = torch.mean(distances.view(-1))
+    root_dists = torch.sqrt(distances)
+    sum_root_dist = torch.sum(root_dists, dim=1)
+    smre = sum_root_dist ** 2
+    clust = torch.mean(smre)
     spread = torch.mean((1 / (torch.pdist(centroids)**2)).view(-1))
     return clust + spread
 
@@ -25,13 +29,13 @@ def cluster_score(data: torch.Tensor, centroids: torch.Tensor):
 class End2End(nn.Module):
 
     def __init__(self, cluster_loss_fxn=cluster_score, min_k=2, max_k=20, alpha=.5, beta=.5, epochs=50, batch_size=100,
-                 device='cuda:0'):
+                 device='cpu'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
             self.dev = torch.device(device)
         else:
             self.dev = torch.device("cpu")
-        self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=1, device=device)
+        self.AE_initializer = AEEnsemble(convolutional_encoding=True, epochs=20, device=device)
         self.loss_fxn = cluster_loss_fxn
         self.reconstruct_loss = torch.nn.MSELoss()
         self.ae_initialized = False
@@ -89,12 +93,18 @@ class End2End(nn.Module):
         return np.ndarray(self.ks), np.ndarray(bics)
 
     def fit(self, X):
+        mp.set_start_method('spawn')
         if not self.ae_initialized:
             print("***INITIALIZING AUTOENCODER***")
-            #self.fit_autoencoder(X)
+            self.fit_autoencoder(X)
         mem_x = X.to_tensor()
         pool = Pool()
         results = pool.starmap(self.fit_k, list(map(lambda p, y: (p, y), list([mem_x]*len(self.ks)), self.ks)))
+        for i, k in enumerate(self.ks):
+            encoders, decoders, gmm = results[i]
+            self.trained_encoders[k] = encoders
+            self.trained_decoders[k] = decoders
+            self.gmm_models[k]= gmm
 
 
     def predict(self, x, k):
@@ -108,21 +118,14 @@ class End2End(nn.Module):
         -------
 
         """
-        data = []
-        try:
-            encoders = self.trained_encoders[k]
-        except IndexError:
-            raise RuntimeError("Must fit before predicting.")
-        for sample in x:
-            if sample[0].shape[0] > 1:
-                data.append(torch.from_numpy(sample[0]).float())
-        if len(data) == 0:
-            raise ValueError
-        raw_spikes = torch.cat(data, dim=0)
-        raw_spikes = raw_spikes.to(self.dev)
+        encoders = self.trained_encoders[k]
+        data = x.to_tensor()
+        raw_spikes = data.to(self.dev)
         latent_vecs = [encoder(raw_spikes) for encoder in encoders]
-        assignments = self.gmm_models[k].predict(latent_vecs)
-        bic = self.gmm_models[k].bic(latent_vecs)
+        latent_vecs = torch.cat(latent_vecs, dim=1)
+        np_latent_vecs = latent_vecs.detach().clone().numpy()
+        assignments = self.gmm_models[k].predict(np_latent_vecs)
+        bic = self.gmm_models[k].bic(np_latent_vecs)
         return assignments, bic
 
 
@@ -131,12 +134,12 @@ if __name__ == '__main__':
     from matplotlib import pyplot as plt
     import pickle
     data = UnsupervisedDataset('./data/alm1/')
-    e2e = End2End(min_k=2, max_k=3, epochs=2, device='cpu')
+    e2e = End2End(min_k=2, max_k=4, epochs=50, device='cpu')
     e2e.fit(data)
-    ks, bics = e2e.bics(data)
-    plt.plot(ks, bics)
     with open('./local/e2e_unsup_mk1.pkl', 'wb') as f:
         pickle.dump(e2e, f)
+    ks, bics = e2e.bics(data)
+    plt.plot(ks, bics)
 
 
 
