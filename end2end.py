@@ -14,7 +14,7 @@ import torch.multiprocessing as mp
 from centerloss_gmm import center_loss_fxn
 
 
-def physical_loss(latent, labels, centroids):
+def atom_loss(latent, labels, centroids):
     centroid_distances = torch.mean((.1 / (torch.pdist(centroids) + 1e-8) ** 2).view(-1))
     point_spread = torch.mean((.001 / (torch.pdist(latent) + 1e-8) ** 3).view(-1))
     points_from_centroid_attractive = torch.mean((-.01 / (torch.cdist(latent, centroids) + 1e-8) ** 2).view(-1))
@@ -25,7 +25,7 @@ def physical_loss(latent, labels, centroids):
 
 class End2End(nn.Module):
 
-    def __init__(self, cluster_loss_fxn=physical_loss, min_k=2, max_k=20, step=1, alpha=.1, beta=1.25, epochs=100, cores=-1, device='cpu'):
+    def __init__(self, cluster_loss_fxn=atom_loss, min_k=2, max_k=20, step=1, alpha=.1, beta=1.25, epochs=100, cores=-1, device='cpu'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
             self.dev = torch.device(device)
