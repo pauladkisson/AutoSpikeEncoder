@@ -14,16 +14,18 @@ import torch.multiprocessing as mp
 from centerloss_gmm import center_loss_fxn
 
 
-def atom_loss(latent, labels, centroids):
-    point_spread = torch.mean((.0001 / (torch.pdist(latent) + 1e-8) ** 3).view(-1))
-    points_from_centroid_attractive = torch.mean((-.01 / (torch.cdist(latent, centroids) + 1e-8) ** 2).view(-1))
-    points_from_centroids_repulsive = torch.mean((.00001 / (torch.cdist(latent, centroids) + 1e-8) ** 3).view(-1))
+def atom_loss(latent, labels, centroids, repulsion_scale=.0001, attraction_scale=.01):
+    point_spread = torch.mean((repulsion_scale / (torch.pdist(latent) + 1e-10) ** 3).view(-1))
+    points_from_centroid_attractive = torch.mean((-attraction_scale / (torch.cdist(latent, centroids) + 1e-10) ** 2).view(-1))
+    points_from_centroids_repulsive = torch.mean((repulsion_scale / (torch.cdist(latent, centroids) + 1e-10) ** 3).view(-1))
     loss = point_spread + points_from_centroids_repulsive + points_from_centroid_attractive
     return loss
 
 
 class End2End(nn.Module):
-
+    """
+    Class to do end to end training. Makes use of multi-target reconstruction and atom loss
+    """
     def __init__(self, cluster_loss_fxn=atom_loss, min_k=2, max_k=20, step=1, alpha=.1, beta=1.25, epochs=100, cores=None, device='cpu'):
         super().__init__()
         if torch.cuda.is_available() and "cpu" not in device:
