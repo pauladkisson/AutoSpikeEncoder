@@ -4,6 +4,7 @@ from typing import Tuple, Dict
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from scipy import signal
+import torch
 
 
 class SupervisedDataset(Dataset):
@@ -46,11 +47,7 @@ class UnsupervisedDataset(Dataset):
     """
 
     def __init__(
-        self,
-        input_dir: str,
-        multichannel: bool = False,
-        load_embeddings=None,
-        session_idx=[0],
+        self, input_dir: str, requested_channels=(0,), multichannel: bool = False, load_embeddings=None
     ):
         sessions = os.listdir(input_dir)
         self._multichannel = multichannel
@@ -62,11 +59,7 @@ class UnsupervisedDataset(Dataset):
         else:
             self.to_load = "spikes.npy"
         sessions = list(filter(lambda x: "session" in x, sessions))
-        sorted_sessions = sorted(sessions, key=lambda x: int(x.split("_")[1]))
-        selected_sessions = []
-        for idx in session_idx:
-            selected_sessions.append(sorted_sessions[idx])
-        for session in selected_sessions:
+        for session in sorted(sessions, key=lambda x: int(x.split("_")[1])):
             session_id = int(session.split("_")[1].strip())
             sess_dir = os.path.join(input_dir, session)
             trials = os.listdir(sess_dir)
@@ -80,8 +73,9 @@ class UnsupervisedDataset(Dataset):
                     channels = os.listdir(trial_dir)
                     channels = list(filter(lambda x: "channel" in x, channels))
                     for channel in sorted(channels, key=lambda x: int(x.split("_")[1])):
-                        channel_id = int(channel.split("_")[1].strip())
-                        self._map.append((session_id, trial_id, channel_id))
+                        if int(channel.split("_")[1]) in requested_channels:
+                            channel_id = int(channel.split("_")[1].strip())
+                            self._map.append((session_id, trial_id, channel_id))
 
     def get_item_info(self, idx: int) -> Dict[str, int]:
         if self._multichannel:
@@ -99,6 +93,15 @@ class UnsupervisedDataset(Dataset):
         channel_path = os.path.join(trial_path, "channel_" + str(channel_id))
         embed = np.array(embeddings)  # should be size num_spikes * embedding_dims
         np.save(os.path.join(channel_path, fname), embed)
+
+    def to_tensor(self):
+        data = []
+        for i in range(len(self)):
+            item, _ = self[i]
+            if len(item) > 0:
+                data.append(torch.from_numpy(item).float())
+        data = torch.cat(data, dim=0)
+        return data
 
     def __len__(self):
         return len(self._map)
