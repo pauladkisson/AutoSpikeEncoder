@@ -1,13 +1,9 @@
+from typing import Union
+
 import numpy as np
 import os
 
 from models import (
-    ShallowFFEncoder,
-    ShallowFFDecoder,
-    IntermediateFFEncoder,
-    IntermediateFFDecoder,
-    DeepFFEncoder,
-    DeepFFDecoder,
     ShallowFFEncoder,
     ShallowFFDecoder,
     IntermediateFFEncoder,
@@ -78,7 +74,7 @@ class AEEnsemble:
         self.training_epochs = epochs
         self.device = device
 
-    def fit(self, x: Dataset):
+    def fit(self, x: Union[Dataset, torch.Tensor]):
         dataloader = DataLoader(x, batch_size=self.batch_size, shuffle=True)
         loss = torch.nn.MSELoss()
         loss_history = [[] for _ in range(len(self.encoders))]
@@ -90,13 +86,16 @@ class AEEnsemble:
             for batch in dataloader.batch_sampler:
                 map(lambda o: o.zero_grad(), self.optimizers)
                 data = []
-                for idx in batch:
-                    sample = x[idx]
-                    if sample[0].shape[0] > 1:
-                        data.append(standardize(torch.from_numpy(sample[0]).float()))
-                if len(data) == 0:
-                    continue
-                spikes = torch.cat(data, dim=0)
+                if type(x) not in [torch.Tensor, np.ndarray]:
+                    for idx in batch:
+                        sample = x[idx]
+                        if sample[0].shape[0] > 1:
+                            data.append(standardize(torch.from_numpy(sample[0]).float()))
+                    if len(data) == 0:
+                        continue
+                    spikes = torch.cat(data, dim=0)
+                else:
+                    spikes = torch.Tensor(x)[batch].float()
                 if "cuda" in self.device:
                     spikes = spikes.cuda(0)
                 latent_vecs = [encoder(spikes) for encoder in self.encoders]
@@ -112,6 +111,7 @@ class AEEnsemble:
                 loss_history[i].append(np.mean(ae_loss))
             map(lambda s: s.step(), self.schedulers)
         loss_history = [np.array(ae_hist) for ae_hist in loss_history]
+        map(lambda o: o.zero_grad(), self.optimizers)
         return loss_history
 
     def predict(
